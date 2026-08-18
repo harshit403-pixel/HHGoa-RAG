@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { INDEX_ROOT } from "./pipeline/config.js";
 import { VectorIndex } from "./pipeline/faiss-index.js";
 
-async function mergeLanguageShards(language: string) {
+export async function mergeLanguageShards(language: string) {
     const shard0Dir = path.join(INDEX_ROOT, `${language}_shard0`);
     const shard1Dir = path.join(INDEX_ROOT, `${language}_shard1`);
     const targetDir = path.join(INDEX_ROOT, language);

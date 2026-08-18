@@ -17,6 +17,7 @@
 // ─────────────────────────────────────────────
 
 import path from "node:path";
+import fs from "node:fs/promises";
 import pLimit from "p-limit";
 import logger from "./logger.js";
 
@@ -37,6 +38,7 @@ import { createEmbedder, type Embedder } from "./embedder.js";
 import { VectorIndex } from "./faiss-index.js";
 import { MetadataStore } from "./metadata-store.js";
 import { Checkpoint } from "./checkpoint.js";
+import { mergeLanguageShards } from "../merge-shards.js";
 
 // ─────────────────────────────────────────────
 // Per-language shard paths
@@ -383,6 +385,30 @@ async function processLanguageFile(
         { language: shardName, finalIndexSize: index.ntotal },
         `${colorCode}[${shardName}] Completed indexing language shard successfully\x1b[0m`
     );
+
+    // ─────────────────────────────────────────────
+    // Auto-merge check: If both shard0 and shard1 are completed, run merge automatically!
+    // ─────────────────────────────────────────────
+    const baseLanguage = language;
+    const paths0 = shardPaths(`${baseLanguage}_shard0`);
+    const paths1 = shardPaths(`${baseLanguage}_shard1`);
+
+    try {
+        const state0Raw = await fs.readFile(path.join(paths0.dir, "state.json"), "utf8");
+        const state1Raw = await fs.readFile(path.join(paths1.dir, "state.json"), "utf8");
+        const state0 = JSON.parse(state0Raw);
+        const state1 = JSON.parse(state1Raw);
+
+        if (state0.completed && state1.completed) {
+            logger.info(
+                { language: baseLanguage },
+                `\x1b[32mBoth shards (0 and 1) for [${baseLanguage}] are completed! Automatically merging...\x1b[0m`
+            );
+            await mergeLanguageShards(baseLanguage);
+        }
+    } catch (e) {
+        // Quietly catch if one of the state.json files doesn't exist or is not complete yet
+    }
 }
 
 // ─────────────────────────────────────────────
