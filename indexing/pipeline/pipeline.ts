@@ -64,6 +64,7 @@ class ProgressTracker {
     private readonly startedAt = Date.now();
     private lastReportAt = Date.now();
     private lastReportVectors = 0;
+    private lastReportPassages = 0;
 
     constructor(
         private readonly totalRows: number,
@@ -84,11 +85,16 @@ class ProgressTracker {
     }
 
     maybeReport(language: string, force = false): void {
-        if (!force && this.passages % PROGRESS_EVERY_N_PASSAGES !== 0) {
+        const now = Date.now();
+        const timeSinceLast = now - this.lastReportAt;
+        const passagesSinceLast = this.passages - this.lastReportPassages;
+
+        // Log if forced, OR if passages exceeded PROGRESS_EVERY_N_PASSAGES, 
+        // OR if 15 seconds have passed since last log (and we have processed at least 1 new passage)
+        if (!force && passagesSinceLast < PROGRESS_EVERY_N_PASSAGES && (timeSinceLast < 15000 || passagesSinceLast === 0)) {
             return;
         }
 
-        const now = Date.now();
         const elapsedSec = (now - this.startedAt) / 1000;
         const sinceLastSec = Math.max((now - this.lastReportAt) / 1000, 0.001);
         const vectorsSinceLast = this.vectors - this.lastReportVectors;
@@ -115,6 +121,7 @@ class ProgressTracker {
 
         this.lastReportAt = now;
         this.lastReportVectors = this.vectors;
+        this.lastReportPassages = this.passages;
     }
 }
 

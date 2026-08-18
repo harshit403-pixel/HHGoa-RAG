@@ -86,7 +86,7 @@ interface DuckDBListValue<T> {
 
 interface DuckDBStructValue {
     entries: {
-        passages?: DuckDBListValue<unknown>;
+        English_passages?: DuckDBListValue<unknown>;
         Translated_passages?: DuckDBListValue<unknown>;
         is_selected?: DuckDBListValue<unknown>;
     };
@@ -148,7 +148,7 @@ export default async function* streamPassagesFromParquet(
 
                 const targetLang = isEnglish ? "engtrain" : String(rawRow.target_lang ?? baseName);
                 const passages = rawRow.passages as DuckDBStructValue | undefined;
-                const listVal = isEnglish ? passages?.entries.passages : passages?.entries.Translated_passages;
+                const listVal = isEnglish ? passages?.entries.English_passages : passages?.entries.Translated_passages;
 
                 if (passages && listVal) {
                     const texts = listVal.items;
