@@ -61,7 +61,7 @@ export class LocalTransformersEmbedder implements Embedder {
     readonly dimension: number;
     readonly model: string;
 
-    private pipelinePromise: Promise<FeatureExtractionPipeline> | null = null;
+    private static globalPipelinePromise: Promise<FeatureExtractionPipeline> | null = null;
 
     constructor(model: string = EMBEDDING_MODEL, dimension: number = EMBEDDING_DIMENSION) {
         this.model = model;
@@ -69,20 +69,31 @@ export class LocalTransformersEmbedder implements Embedder {
     }
 
     private async getPipeline(): Promise<FeatureExtractionPipeline> {
-        if (!this.pipelinePromise) {
-            this.pipelinePromise = (async () => {
-                // Dynamic import: @xenova/transformers is an
-                // optional dependency of this module — only
-                // required when EMBEDDING_PROVIDER === "local".
+        if (!LocalTransformersEmbedder.globalPipelinePromise) {
+            LocalTransformersEmbedder.globalPipelinePromise = (async () => {
+                logger.info(`Initializing local model "${this.model}" (this may take a moment on first download)`);
                 const { pipeline } = await import("@xenova/transformers");
                 const extractor = await pipeline(
                     "feature-extraction",
-                    this.model
+                    this.model,
+                    {
+                        progress_callback: (info: any) => {
+                            if (info.status === "progress") {
+                                logger.info(
+                                    { file: info.file, progress: `${info.progress.toFixed(1)}%` },
+                                    "Downloading model file progress"
+                                );
+                            } else if (info.status === "done") {
+                                logger.info({ file: info.file }, "Model file download complete");
+                            }
+                        }
+                    }
                 );
+                logger.info(`Local model "${this.model}" loaded and initialized successfully`);
                 return extractor as unknown as FeatureExtractionPipeline;
             })();
         }
-        return this.pipelinePromise;
+        return LocalTransformersEmbedder.globalPipelinePromise;
     }
 
     async embed(texts: string[]): Promise<Float32Array> {

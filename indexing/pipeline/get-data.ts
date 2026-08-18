@@ -93,9 +93,10 @@ interface DuckDBStructValue {
 
 export default async function* streamPassagesFromParquet(
     filePath: string,
-    maxRecords?: number
+    offset?: number,
+    limit?: number
 ): AsyncGenerator<PassageRow[], void, unknown> {
-    logger.info({ filePath, maxRecords }, "Starting DuckDB parquet stream reader");
+    logger.info({ filePath, offset, limit }, "Starting DuckDB parquet stream reader");
     const db = await DuckDBInstance.create(":memory:");
     const conn = await db.connect();
 
@@ -104,12 +105,9 @@ export default async function* streamPassagesFromParquet(
         path.extname(filePath)
     );
 
-    // Only apply LIMIT when a cap is explicitly passed.
-    // Leaving maxRecords undefined streams every record
-    // in the file.
-    const limitClause =
-        maxRecords !== undefined
-            ? `LIMIT ${maxRecords}`
+    const limitOffsetClause =
+        limit !== undefined
+            ? `LIMIT ${limit} OFFSET ${offset ?? 0}`
             : "";
 
     try {
@@ -118,10 +116,10 @@ export default async function* streamPassagesFromParquet(
                 target_lang,
                 passages
             FROM read_parquet('${filePath}')
-            ${limitClause}
+            ${limitOffsetClause}
         `);
 
-        let queryId = 0;
+        let queryId = offset ?? 0;
 
         while (true) {
             const chunk = await result.fetchChunk();

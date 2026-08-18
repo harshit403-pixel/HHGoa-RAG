@@ -67,7 +67,8 @@ class ProgressTracker {
 
     constructor(
         private readonly totalRows: number,
-        private readonly initialOffset: number
+        private readonly initialOffset: number,
+        private readonly colorCode: string
     ) {}
 
     recordPassage(): void {
@@ -109,7 +110,7 @@ class ProgressTracker {
                 memory: `${memMb}MB`,
                 elapsed: `${(elapsedSec / 60).toFixed(1)}min`,
             },
-            "Pipeline progress update"
+            `${this.colorCode}[${language}] Pipeline progress update\x1b[0m`
         );
 
         this.lastReportAt = now;
@@ -159,24 +160,51 @@ async function embedAndIndexBatch(
 // Process one language's parquet file end-to-end
 // ─────────────────────────────────────────────
 
+const ANSI_COLORS = [
+    "\x1b[38;5;196m", // Red
+    "\x1b[38;5;46m",  // Green
+    "\x1b[38;5;226m", // Yellow
+    "\x1b[38;5;33m",  // Light Blue
+    "\x1b[38;5;201m", // Magenta
+    "\x1b[38;5;51m",  // Cyan
+    "\x1b[38;5;208m", // Orange
+    "\x1b[38;5;118m", // Lime Green
+    "\x1b[38;5;129m", // Purple
+    "\x1b[38;5;27m",  // Deep Blue
+    "\x1b[38;5;220m", // Gold
+    "\x1b[38;5;165m", // Deep Pink
+    "\x1b[38;5;86m",  // Aquamarine
+];
+
 async function processLanguageFile(
-    filePath: string
+    filePath: string,
+    shardIndex: number,
+    offset: number,
+    limit: number,
+    colorCode: string
 ): Promise<void> {
     const language = path.basename(filePath, path.extname(filePath));
-    const paths = shardPaths(language);
+    const shardName = `${language}_shard${shardIndex}`;
+    const paths = shardPaths(shardName);
 
-    logger.info({ language, filePath }, "Processing file end-to-end");
+    logger.info(
+        { language: shardName, filePath, offset, limit },
+        `${colorCode}[${shardName}] Processing file end-to-end (offset: ${offset}, limit: ${limit})\x1b[0m`
+    );
 
     const embedder = createEmbedder();
 
     const checkpoint = await Checkpoint.loadOrCreate(
         paths.dir,
-        language,
+        shardName,
         filePath
     );
 
     if (checkpoint.isCompleted) {
-        logger.info({ language }, "File already completed — skipping.");
+        logger.info(
+            { language: shardName },
+            `${colorCode}[${shardName}] Shard already completed — skipping.\x1b[0m`
+        );
         return;
     }
 
@@ -189,18 +217,17 @@ async function processLanguageFile(
         path.join(paths.dir, "metadata.db")
     );
 
-    const totalRows = await getParquetRowCount(filePath).catch(() => 0);
-    const progress = new ProgressTracker(totalRows, checkpoint.rowsConsumed);
+    const progress = new ProgressTracker(limit, checkpoint.rowsConsumed, colorCode);
 
     logger.info(
         {
-            language,
+            language: shardName,
             resumeOffset: checkpoint.rowsConsumed,
-            totalRows,
-            percent: (totalRows > 0 ? (checkpoint.rowsConsumed / totalRows * 100).toFixed(2) : "0.00") + "%",
+            totalRows: limit,
+            percent: (limit > 0 ? (checkpoint.rowsConsumed / limit * 100).toFixed(2) : "0.00") + "%",
             alreadyIndexed: checkpoint.vectorsIndexed,
         },
-        "Initialized shard parameters"
+        `${colorCode}[${shardName}] Initialized shard parameters (offset: ${offset}, limit: ${limit})\x1b[0m`
     );
 
     let rowsSeen = 0;
@@ -209,7 +236,7 @@ async function processLanguageFile(
     let buffer: Chunk[] = [];
 
     const persistCheckpoint = async (): Promise<void> => {
-        logger.info({ language }, "Persisting checkpoint to disk");
+        logger.info({ language: shardName }, `${colorCode}[${shardName}] Persisting checkpoint to disk\x1b[0m`);
         await index.save(paths.indexFile);
         metadata.checkpoint();
 
@@ -220,17 +247,17 @@ async function processLanguageFile(
         await checkpoint.persist();
 
         logger.info(
-            { language, totalVectors: index.ntotal },
-            "Checkpoint successfully persisted"
+            { language: shardName, totalVectors: index.ntotal },
+            `${colorCode}[${shardName}] Checkpoint successfully persisted\x1b[0m`
         );
     };
 
     const resumeOffset = checkpoint.rowsConsumed;
 
-    for await (const rowBatch of streamPassagesFromParquet(filePath)) {
+    for await (const rowBatch of streamPassagesFromParquet(filePath, offset, limit)) {
         logger.info(
-            { language, passagesInBatch: rowBatch.length },
-            "Processing unnested batch from parquet rows"
+            { language: shardName, passagesInBatch: rowBatch.length },
+            `${colorCode}[${shardName}] Processing unnested batch from parquet rows\x1b[0m`
         );
 
         const tasks: Promise<void>[] = [];
@@ -264,7 +291,7 @@ async function processLanguageFile(
                     index,
                     metadata,
                     progress,
-                    language
+                    shardName
                 );
                 tasks.push(task);
                 vectorsSinceCheckpoint += batch.length;
@@ -274,8 +301,8 @@ async function processLanguageFile(
         // Flush any remaining chunks in the buffer immediately after processing this 20-row batch
         if (buffer.length > 0) {
             logger.info(
-                { language, count: buffer.length },
-                "Flushing remaining chunks for this row batch in safe batches"
+                { language: shardName, count: buffer.length },
+                `${colorCode}[${shardName}] Flushing remaining chunks for this row batch in safe batches\x1b[0m`
             );
             while (buffer.length > 0) {
                 const batch = buffer.slice(0, EMBEDDING_BATCH_SIZE);
@@ -289,7 +316,7 @@ async function processLanguageFile(
                     index,
                     metadata,
                     progress,
-                    language
+                    shardName
                 );
                 tasks.push(task);
                 vectorsSinceCheckpoint += batch.length;
@@ -315,10 +342,10 @@ async function processLanguageFile(
 
     metadata.close();
 
-    progress.maybeReport(language, true);
+    progress.maybeReport(shardName, true);
     logger.info(
-        { language, finalIndexSize: index.ntotal },
-        "Completed indexing language file successfully"
+        { language: shardName, finalIndexSize: index.ntotal },
+        `${colorCode}[${shardName}] Completed indexing language shard successfully\x1b[0m`
     );
 }
 
@@ -326,12 +353,22 @@ async function processLanguageFile(
 // Main
 // ─────────────────────────────────────────────
 
-export async function runPipeline(): Promise<void> {
+export async function runPipeline(selectedLangs?: string[]): Promise<void> {
     logger.info("Starting streaming chunk + embed + FAISS index pipeline");
 
-    const parquetFiles = await listParquetFiles(TRAIN_DIR);
+    let parquetFiles = await listParquetFiles(TRAIN_DIR);
     // Sort files alphabetically to ensure deterministic order (1st file, 2nd file, etc.)
     parquetFiles.sort((a, b) => a.localeCompare(b));
+
+    // Filter by selected languages if provided via command-line arguments
+    if (selectedLangs && selectedLangs.length > 0) {
+        const normalizedSelected = selectedLangs.map((lang) => lang.toLowerCase().trim());
+        parquetFiles = parquetFiles.filter((filePath) => {
+            const langName = path.basename(filePath, path.extname(filePath)).toLowerCase();
+            return normalizedSelected.some((sel) => langName.includes(sel) || sel.includes(langName));
+        });
+        logger.info({ selectedLangs, matchedCount: parquetFiles.length }, "Filtered files by command-line arguments");
+    }
 
     logger.info(
         {
@@ -344,11 +381,37 @@ export async function runPipeline(): Promise<void> {
     );
 
     const fileLimit = pLimit(FILE_CONCURRENCY);
+    const tasks: (() => Promise<void>)[] = [];
+
+    for (let i = 0; i < parquetFiles.length; i++) {
+        const filePath = parquetFiles[i];
+        if (!filePath) continue;
+
+        const totalRows = await getParquetRowCount(filePath).catch(() => 0);
+        const halfRows = Math.floor(totalRows / 2);
+        const colorCode = ANSI_COLORS[i % ANSI_COLORS.length] || "";
+
+        // Shard 0: first 50%
+        tasks.push(() => processLanguageFile(
+            filePath,
+            0,
+            0,
+            halfRows,
+            colorCode
+        ));
+
+        // Shard 1: second 50%
+        tasks.push(() => processLanguageFile(
+            filePath,
+            1,
+            halfRows,
+            totalRows - halfRows,
+            colorCode
+        ));
+    }
 
     await Promise.all(
-        parquetFiles.map((filePath) =>
-            fileLimit(() => processLanguageFile(filePath))
-        )
+        tasks.map((task) => fileLimit(task))
     );
 
     logger.info("All language files successfully processed and indexed");

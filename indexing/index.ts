@@ -13,4 +13,5 @@
 import "dotenv/config";
 import { runPipeline } from "./pipeline/pipeline.js";
 
-await runPipeline();
+const selectedLangs = process.argv.slice(2);
+await runPipeline(selectedLangs);
