@@ -11,14 +11,14 @@
 //   {INDEX_ROOT}/<language>/state.json   (resume checkpoint)
 //
 // Memory discipline: at any moment, only the current
-// DuckDB row batch (~2048 rows) and up to
-// MAX_PENDING_EMBEDDING_BATCHES in-flight embed/index
+// DuckDB row batch (~20 rows) and in-flight embed/index
 // batches are held in memory. Nothing accumulates for
 // the life of a file.
 // ─────────────────────────────────────────────
 
 import path from "node:path";
 import pLimit from "p-limit";
+import logger from "./logger.js";
 
 import streamPassagesFromParquet, { listParquetFiles, getParquetRowCount } from "./get-data.js";
 import chunkPassage from "./chunk-data.js";
@@ -49,10 +49,8 @@ interface ShardPaths {
 
 function shardPaths(language: string): ShardPaths {
     const dir = path.join(INDEX_ROOT, language);
-    return {
-        dir,
-        indexFile: path.join(dir, "index.faiss"),
-    };
+    const indexFile = path.join(dir, "index.faiss");
+    return { dir, indexFile };
 }
 
 // ─────────────────────────────────────────────
@@ -100,12 +98,18 @@ class ProgressTracker {
         const currentTotal = this.initialOffset + this.passages;
         const percent = this.totalRows > 0 ? (currentTotal / this.totalRows * 100).toFixed(2) : "0.00";
 
-        console.log(
-            `[${language}] passages=${currentTotal.toLocaleString()}/${this.totalRows.toLocaleString()} (${percent}%) ` +
-            `chunks=${this.chunks.toLocaleString()} ` +
-            `vectors=${this.vectors.toLocaleString()} ` +
-            `throughput=${throughput.toFixed(1)} vec/s ` +
-            `rss=${memMb}MB elapsed=${(elapsedSec / 60).toFixed(1)}min`
+        logger.info(
+            {
+                language,
+                progress: `${currentTotal.toLocaleString()}/${this.totalRows.toLocaleString()}`,
+                percent: `${percent}%`,
+                chunks: this.chunks,
+                vectors: this.vectors,
+                throughput: `${throughput.toFixed(1)} vec/s`,
+                memory: `${memMb}MB`,
+                elapsed: `${(elapsedSec / 60).toFixed(1)}min`,
+            },
+            "Pipeline progress update"
         );
 
         this.lastReportAt = now;
@@ -126,17 +130,29 @@ async function embedAndIndexBatch(
     progress: ProgressTracker,
     language: string
 ): Promise<void> {
+    logger.info(
+        { language, batchSize: chunks.length, idStart: faissIdStart },
+        "Beginning embed + index step for batch"
+    );
 
     const texts = chunks.map((chunk) => chunk.text);
     const vectors = await embedder.embed(texts);
 
     const ids = chunks.map((_, i) => BigInt(faissIdStart + i));
 
+    logger.debug({ language, count: ids.length }, "Adding vectors to FAISS index");
     index.addBatch(ids, vectors);
+
+    logger.debug({ language, count: ids.length }, "Adding chunks to SQLite metadata store");
     metadata.addBatch(ids, chunks);
 
     progress.recordVectors(chunks.length);
     progress.maybeReport(language);
+
+    logger.info(
+        { language, batchSize: chunks.length, totalVectors: index.ntotal },
+        "Completed embed + index step for batch"
+    );
 }
 
 // ─────────────────────────────────────────────
@@ -147,9 +163,10 @@ async function processLanguageFile(
     filePath: string,
     embedder: Embedder
 ): Promise<void> {
-
     const language = path.basename(filePath, path.extname(filePath));
     const paths = shardPaths(language);
+
+    logger.info({ language, filePath }, "Processing file end-to-end");
 
     const checkpoint = await Checkpoint.loadOrCreate(
         paths.dir,
@@ -158,7 +175,7 @@ async function processLanguageFile(
     );
 
     if (checkpoint.isCompleted) {
-        console.log(`[${language}] already completed — skipping.`);
+        logger.info({ language }, "File already completed — skipping.");
         return;
     }
 
@@ -174,58 +191,24 @@ async function processLanguageFile(
     const totalRows = await getParquetRowCount(filePath).catch(() => 0);
     const progress = new ProgressTracker(totalRows, checkpoint.rowsConsumed);
 
-    console.log(
-        `[${language}] starting — resume offset: ${checkpoint.rowsConsumed.toLocaleString()} / ${totalRows.toLocaleString()} rows ` +
-        `(${(totalRows > 0 ? (checkpoint.rowsConsumed / totalRows * 100).toFixed(2) : "0.00")}%), ` +
-        `${checkpoint.vectorsIndexed.toLocaleString()} vectors already indexed.`
+    logger.info(
+        {
+            language,
+            resumeOffset: checkpoint.rowsConsumed,
+            totalRows,
+            percent: (totalRows > 0 ? (checkpoint.rowsConsumed / totalRows * 100).toFixed(2) : "0.00") + "%",
+            alreadyIndexed: checkpoint.vectorsIndexed,
+        },
+        "Initialized shard parameters"
     );
-
-    // Bounds how many embed+index tasks run concurrently, so
-    // pending work never exceeds
-    // MAX_PENDING_EMBEDDING_BATCHES * EMBEDDING_BATCH_SIZE
-    // chunks/vectors in flight at once.
-    const embedLimit = pLimit(MAX_PENDING_EMBEDDING_BATCHES);
 
     let rowsSeen = 0;
     let rowsConsumedThisRun = 0;
     let vectorsSinceCheckpoint = 0;
     let buffer: Chunk[] = [];
-    const inFlight: Promise<void>[] = [];
-
-    const flushBuffer = (): void => {
-        if (buffer.length === 0) return;
-
-        const batch = buffer;
-        buffer = [];
-
-        const faissIdStart = checkpoint.reserveIds(batch.length);
-
-        const task = embedLimit(() =>
-            embedAndIndexBatch(
-                batch,
-                faissIdStart,
-                embedder,
-                index,
-                metadata,
-                progress,
-                language
-            )
-        );
-
-        inFlight.push(task);
-        vectorsSinceCheckpoint += batch.length;
-    };
-
-    const drainInFlight = async (): Promise<void> => {
-        await Promise.all(inFlight);
-        inFlight.length = 0;
-    };
 
     const persistCheckpoint = async (): Promise<void> => {
-        // Save index + metadata BEFORE advancing the checkpoint
-        // file, so a crash between these calls just means
-        // resuming redoes a little work — never that we believe
-        // we're further along than what's durably on disk.
+        logger.info({ language }, "Persisting checkpoint to disk");
         await index.save(paths.indexFile);
         metadata.checkpoint();
 
@@ -235,14 +218,20 @@ async function processLanguageFile(
 
         await checkpoint.persist();
 
-        console.log(
-            `[${language}] checkpoint saved — ${index.ntotal.toLocaleString()} vectors total.`
+        logger.info(
+            { language, totalVectors: index.ntotal },
+            "Checkpoint successfully persisted"
         );
     };
 
     const resumeOffset = checkpoint.rowsConsumed;
 
     for await (const rowBatch of streamPassagesFromParquet(filePath)) {
+        logger.info(
+            { language, passagesInBatch: rowBatch.length },
+            "Processing unnested batch from parquet rows"
+        );
+
         for (const row of rowBatch) {
             rowsSeen++;
 
@@ -259,20 +248,54 @@ async function processLanguageFile(
             buffer.push(...chunks);
             rowsConsumedThisRun++;
 
-            if (buffer.length >= EMBEDDING_BATCH_SIZE) {
-                flushBuffer();
-            }
+            // Convert and index chunks in batches of EMBEDDING_BATCH_SIZE (32)
+            while (buffer.length >= EMBEDDING_BATCH_SIZE) {
+                const batch = buffer.slice(0, EMBEDDING_BATCH_SIZE);
+                buffer = buffer.slice(EMBEDDING_BATCH_SIZE);
 
-            if (vectorsSinceCheckpoint >= CHECKPOINT_EVERY_N_VECTORS) {
-                await drainInFlight();
-                await persistCheckpoint();
+                const faissIdStart = checkpoint.reserveIds(batch.length);
+                await embedAndIndexBatch(
+                    batch,
+                    faissIdStart,
+                    embedder,
+                    index,
+                    metadata,
+                    progress,
+                    language
+                );
+                vectorsSinceCheckpoint += batch.length;
             }
+        }
+
+        // Flush any remaining chunks in the buffer immediately after processing this 20-row batch
+        if (buffer.length > 0) {
+            logger.info(
+                { language, count: buffer.length },
+                "Flushing remaining chunks for this row batch"
+            );
+            const faissIdStart = checkpoint.reserveIds(buffer.length);
+            await embedAndIndexBatch(
+                buffer,
+                faissIdStart,
+                embedder,
+                index,
+                metadata,
+                progress,
+                language
+            );
+            vectorsSinceCheckpoint += buffer.length;
+            buffer = [];
+        }
+
+        if (vectorsSinceCheckpoint >= CHECKPOINT_EVERY_N_VECTORS) {
+            await persistCheckpoint();
         }
     }
 
-    flushBuffer();
-    await drainInFlight();
-    await persistCheckpoint();
+    // Final clean up and flush
+    if (vectorsSinceCheckpoint > 0) {
+        await persistCheckpoint();
+    }
 
     checkpoint.markCompleted();
     await checkpoint.persist();
@@ -280,7 +303,10 @@ async function processLanguageFile(
     metadata.close();
 
     progress.maybeReport(language, true);
-    console.log(`[${language}] done. Final index size: ${index.ntotal.toLocaleString()} vectors.`);
+    logger.info(
+        { language, finalIndexSize: index.ntotal },
+        "Completed indexing language file successfully"
+    );
 }
 
 // ─────────────────────────────────────────────
@@ -288,14 +314,27 @@ async function processLanguageFile(
 // ─────────────────────────────────────────────
 
 export async function runPipeline(): Promise<void> {
-    console.log("\nStarting streaming chunk + embed + FAISS index pipeline...\n");
+    logger.info("Starting streaming chunk + embed + FAISS index pipeline");
 
     const embedder = createEmbedder();
-    console.log(`Embedder: model="${embedder.model}", dim=${embedder.dimension}\n`);
+    logger.info(
+        { model: embedder.model, dimension: embedder.dimension },
+        "Created embedding model instance"
+    );
 
     const parquetFiles = await listParquetFiles(TRAIN_DIR);
-    console.log(`Found ${parquetFiles.length} language files in ${TRAIN_DIR}. Concurrency: ${FILE_CONCURRENCY}\n`);
-    console.log(`Indexes will be saved under ${INDEX_ROOT}\n`);
+    // Sort files alphabetically to ensure deterministic order (1st file, 2nd file, etc.)
+    parquetFiles.sort((a, b) => a.localeCompare(b));
+
+    logger.info(
+        {
+            directory: TRAIN_DIR,
+            fileCount: parquetFiles.length,
+            concurrency: FILE_CONCURRENCY,
+            indexRoot: INDEX_ROOT,
+        },
+        "Configured ingestion variables"
+    );
 
     const fileLimit = pLimit(FILE_CONCURRENCY);
 
@@ -305,5 +344,5 @@ export async function runPipeline(): Promise<void> {
         )
     );
 
-    console.log("\nAll languages indexed.");
+    logger.info("All language files successfully processed and indexed");
 }

@@ -2,6 +2,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { PassageRow } from "./types.ts";
+import logger from "./logger.js";
 
 // ─────────────────────────────────────────────
 // listParquetFiles
@@ -15,18 +16,21 @@ import type { PassageRow } from "./types.ts";
 export async function listParquetFiles(
     dir: string
 ): Promise<string[]> {
-
+    logger.info({ dir }, "Scanning directory for Parquet files");
     const entries = await fs.readdir(dir, {
         withFileTypes: true,
     });
 
-    return entries
+    const files = entries
         .filter(
             (entry) =>
                 entry.isFile() &&
                 entry.name.endsWith(".parquet")
         )
         .map((entry) => path.join(dir, entry.name));
+
+    logger.info({ dir, count: files.length }, "Found Parquet files");
+    return files;
 }
 
 // ─────────────────────────────────────────────
@@ -40,6 +44,7 @@ export async function listParquetFiles(
 export async function getParquetRowCount(
     filePath: string
 ): Promise<number> {
+    logger.info({ filePath }, "Checking row count for Parquet file");
     const db = await DuckDBInstance.create(":memory:");
     const conn = await db.connect();
     try {
@@ -50,7 +55,9 @@ export async function getParquetRowCount(
         const chunk = await result.fetchChunk();
         if (chunk) {
             const rows = chunk.getRowObjects(result.deduplicatedColumnNames());
-            return Number(rows[0]?.total ?? 0);
+            const total = Number(rows[0]?.total ?? 0);
+            logger.info({ filePath, total }, "Successfully retrieved Parquet row count");
+            return total;
         }
         return 0;
     } finally {
@@ -73,11 +80,22 @@ export async function getParquetRowCount(
 // and write immediately, then let it be GC'd.
 // ─────────────────────────────────────────────
 
+interface DuckDBListValue<T> {
+    items: T[];
+}
+
+interface DuckDBStructValue {
+    entries: {
+        Translated_passages?: DuckDBListValue<unknown>;
+        is_selected?: DuckDBListValue<unknown>;
+    };
+}
+
 export default async function* streamPassagesFromParquet(
     filePath: string,
     maxRecords?: number
 ): AsyncGenerator<PassageRow[], void, unknown> {
-
+    logger.info({ filePath, maxRecords }, "Starting DuckDB parquet stream reader");
     const db = await DuckDBInstance.create(":memory:");
     const conn = await db.connect();
 
@@ -97,39 +115,19 @@ export default async function* streamPassagesFromParquet(
     try {
         const result = await conn.stream(`
             SELECT
-                query_id,
                 target_lang,
-                passage_index,
-                passage,
-                is_selected
-
-            FROM (
-                SELECT
-                    row_number() OVER () - 1 AS query_id,
-                    target_lang,
-
-                    unnest(
-                        range(0, array_length(passages.Translated_passages))
-                    ) AS passage_index,
-
-                    unnest(passages.Translated_passages) AS passage,
-                    unnest(passages.is_selected) AS is_selected
-
-                FROM (
-                    SELECT
-                        target_lang,
-                        passages
-
-                    FROM read_parquet('${filePath}')
-                    ${limitClause}
-                )
-            )
+                passages
+            FROM read_parquet('${filePath}')
+            ${limitClause}
         `);
+
+        let queryId = 0;
 
         while (true) {
             const chunk = await result.fetchChunk();
 
             if (!chunk || chunk.rowCount === 0) {
+                logger.info({ filePath }, "Parquet stream reader reached end of file");
                 break;
             }
 
@@ -137,37 +135,65 @@ export default async function* streamPassagesFromParquet(
                 result.deduplicatedColumnNames()
             );
 
+            logger.info(
+                { filePath, rawRowCount: rawRows.length },
+                "Fetched chunk from DuckDB, parsing in batches of 20 original rows"
+            );
+
             const rows: PassageRow[] = [];
+            let rowsInBatch = 0;
 
             for (const rawRow of rawRows) {
                 if (!rawRow) continue;
 
-                const row: PassageRow = {
-                    query_id: Number(rawRow.query_id ?? 0),
-                    target_lang: String(
-                        rawRow.target_lang ?? baseName
-                    ),
-                    passage_index: Number(
-                        rawRow.passage_index ?? 0
-                    ),
-                    passage: String(
-                        rawRow.passage ?? ""
-                    ).trim(),
-                    is_selected:
-                        Number(rawRow.is_selected ?? 0) === 1,
-                };
+                const targetLang = String(rawRow.target_lang ?? baseName);
+                const passages = rawRow.passages as DuckDBStructValue | undefined;
 
-                if (!row.passage) continue;
+                if (passages && passages.entries.Translated_passages) {
+                    const texts = passages.entries.Translated_passages.items;
+                    const selected = passages.entries.is_selected?.items ?? [];
 
-                rows.push(row);
+                    for (let i = 0; i < texts.length; i++) {
+                        const passageText = String(texts[i] ?? "").trim();
+                        if (!passageText) continue;
+
+                        const row: PassageRow = {
+                            query_id: queryId,
+                            target_lang: targetLang,
+                            passage_index: i,
+                            passage: passageText,
+                            is_selected: Number(selected[i] ?? 0) === 1,
+                        };
+                        rows.push(row);
+                    }
+                }
+                queryId++;
+                rowsInBatch++;
+
+                if (rowsInBatch >= 20) {
+                    if (rows.length > 0) {
+                        logger.debug(
+                            { filePath, batchPassages: rows.length, queryIdStart: queryId - 20, queryIdEnd: queryId - 1 },
+                            "Yielding sub-batch of 20 original Parquet rows"
+                        );
+                        yield rows;
+                        rows.length = 0;
+                    }
+                    rowsInBatch = 0;
+                }
             }
 
             if (rows.length > 0) {
+                logger.debug(
+                    { filePath, batchPassages: rows.length },
+                    "Yielding remaining rows in chunk"
+                );
                 yield rows;
             }
         }
 
     } finally {
         conn.disconnectSync();
+        logger.info({ filePath }, "Closed DuckDB connection for parquet stream reader");
     }
 }

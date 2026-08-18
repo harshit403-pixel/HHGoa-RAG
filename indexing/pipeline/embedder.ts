@@ -14,6 +14,7 @@ import {
     EMBEDDING_MODEL,
     EMBEDDING_PROVIDER,
 } from "./config.ts";
+import logger from "./logger.js";
 
 // ─────────────────────────────────────────────
 // Interface
@@ -209,11 +210,13 @@ export class MistralEmbedder implements Embedder {
         ].map(k => k?.trim()).filter(Boolean) as string[];
 
         if (this.apiKeys.length === 0) {
+            logger.error("MistralEmbedder initialization failed: No API keys configured");
             throw new Error(
                 "MistralEmbedder requires at least one API key. " +
                 "Please configure MISTRAL_API_KEY, MISTRAL_API_KEY2, MISTRAL_API_KEY3, or MISTRAL_API_KEY4."
             );
         }
+        logger.info({ totalKeys: this.apiKeys.length }, "MistralEmbedder successfully initialized");
     }
 
     async embed(texts: string[]): Promise<Float32Array> {
@@ -223,6 +226,8 @@ export class MistralEmbedder implements Embedder {
 
         let attempts = 0;
         const totalKeys = this.apiKeys.length;
+
+        logger.info({ batchSize: texts.length }, "Sending batch of texts to Mistral API");
 
         while (true) {
             const apiKey = this.apiKeys[this.currentKeyIndex];
@@ -265,15 +270,22 @@ export class MistralEmbedder implements Embedder {
                     flat.set(item.embedding, item.index * this.dimension);
                 }
 
+                logger.info(
+                    { keyIndex: this.currentKeyIndex, vectorCount: result.data.length },
+                    "Successfully embedded batch with Mistral API"
+                );
+
                 // Add a small delay (e.g. 2 seconds) after successful request to prevent hitting rate limits
+                logger.debug("Sleeping for 2 seconds to respect rate limits...");
                 await new Promise((resolve) => setTimeout(resolve, 2000));
 
                 return flat;
 
             } catch (error) {
-                console.warn(
-                    `Mistral API error with key index ${this.currentKeyIndex}:`,
-                    error instanceof Error ? error.message : String(error)
+                const errMsg = error instanceof Error ? error.message : String(error);
+                logger.warn(
+                    { keyIndex: this.currentKeyIndex, error: errMsg },
+                    "Mistral API request failed"
                 );
 
                 attempts++;
@@ -281,17 +293,20 @@ export class MistralEmbedder implements Embedder {
                 this.currentKeyIndex = (this.currentKeyIndex + 1) % totalKeys;
 
                 // Wait 5 seconds before trying the next key to avoid immediate cascading rate limits
-                console.log("Sleeping for 5 seconds before trying the next key/retry...");
+                logger.warn("Sleeping for 5 seconds before trying the next key/retry...");
                 await new Promise((resolve) => setTimeout(resolve, 5000));
 
                 // If we tried all keys and failed
                 if (attempts >= totalKeys) {
-                    console.warn("All Mistral API keys failed. Sleeping for 3 minutes before retrying...");
+                    logger.error(
+                        { attempts, totalKeys },
+                        "All Mistral API keys failed. Sleeping for 3 minutes before retrying..."
+                    );
                     // Wait for 3 minutes (180 seconds)
                     await new Promise((resolve) => setTimeout(resolve, 180000));
                     attempts = 0; // Reset attempts to try all keys again
                 } else {
-                    console.log(`Switching to API key index ${this.currentKeyIndex}...`);
+                    logger.info({ nextKeyIndex: this.currentKeyIndex }, "Rotating to next API key");
                 }
             }
         }
