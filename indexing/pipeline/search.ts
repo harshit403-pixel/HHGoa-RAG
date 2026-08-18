@@ -110,7 +110,7 @@ export class LanguageSearcher {
                 // distance is better, so we negate for a
                 // "higher is better" convention. Callers that
                 // want raw distance can use `-score`.
-                score: -distances[i],
+                score: -(distances[i] ?? 0),
                 chunk_id: meta.chunk_id,
                 parent_id: meta.parent_id,
                 text: meta.text,

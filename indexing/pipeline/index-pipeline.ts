@@ -21,9 +21,9 @@ import pLimit from "p-limit";
 
 import streamPassagesFromParquet, {
     listParquetFiles,
-} from "../get-data.ts";
-import chunkPassage from "../chunk-data.ts";
-import type { Chunk } from "../types.ts";
+} from "./get-data.ts";
+import chunkPassage from "./chunk-data.ts";
+import type { Chunk } from "./types.ts";
 
 import {
     CHECKPOINT_EVERY_N_VECTORS,

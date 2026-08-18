@@ -29,10 +29,7 @@ import {
     INDEX_TYPE,
 } from "./config.ts";
 
-// faiss-napi ships CJS with its own .d.ts; import via
-// namespace import to keep this file strict-mode clean
-// without needing to hand-roll types for the whole lib.
-import * as faiss from "faiss-napi";
+import faiss from "faiss-napi";
 
 export interface IndexSearchResult {
     ids: bigint[];
@@ -56,7 +53,8 @@ export class VectorIndex {
     private readonly indexType: "hnsw" | "flat";
     private readonly hnswM: number;
     private readonly hnswEfConstruction: number;
-    private index: faiss.IndexIDMap2;
+    private index: faiss.Index;
+    private baseHNSW: faiss.IndexHNSW | null = null;
 
     /**
      * currentEfSearch tracks what's currently applied to
@@ -74,7 +72,7 @@ export class VectorIndex {
      */
     private constructor(
         options: VectorIndexOptions,
-        preloadedIndex: faiss.IndexIDMap2 | null
+        preloadedIndex: faiss.Index | null
     ) {
         this.dimension = options.dimension ?? EMBEDDING_DIMENSION;
         this.indexType = options.indexType ?? INDEX_TYPE;
@@ -90,7 +88,7 @@ export class VectorIndex {
         return new VectorIndex(options, null);
     }
 
-    private buildBaseIndex(): faiss.IndexIDMap2 {
+    private buildBaseIndex(): faiss.Index {
         if (this.indexType === "flat") {
             // Exact search baseline — recall/correctness
             // evaluation only. O(n) per query, so keep this
@@ -118,14 +116,20 @@ export class VectorIndex {
         //     live, don't rebuild the index for it.
         const factoryString = `HNSW${this.hnswM},Flat`;
 
-        const hnsw = faiss.Index.fromFactory(
+        const baseIndex = faiss.Index.fromFactory(
             this.dimension,
             factoryString,
             faiss.MetricType.METRIC_L2
-        ) as faiss.IndexHNSW;
+        );
 
-        hnsw.hnsw.efConstruction = this.hnswEfConstruction;
-        hnsw.hnsw.efSearch = this.currentEfSearch;
+        // Serialize and restore as IndexHNSW to expose efSearch/efConstruction safely
+        const buffer = baseIndex.toBuffer();
+        const hnsw = faiss.IndexHNSW.fromBuffer(buffer);
+
+        hnsw.efConstruction = this.hnswEfConstruction;
+        hnsw.efSearch = this.currentEfSearch;
+
+        this.baseHNSW = hnsw;
 
         return hnsw.toIDMap2();
     }
@@ -164,11 +168,9 @@ export class VectorIndex {
         if (this.indexType !== "hnsw") return;
         if (efSearch === this.currentEfSearch) return;
 
-        // faiss-napi exposes the underlying HNSW struct through
-        // IndexIDMap2's wrapped index; if a future version
-        // changes this path, this is the one place to fix it.
-        const inner = (this.index as unknown as { index: faiss.IndexHNSW }).index;
-        inner.hnsw.efSearch = efSearch;
+        if (this.baseHNSW) {
+            this.baseHNSW.efSearch = efSearch;
+        }
         this.currentEfSearch = efSearch;
     }
 
@@ -203,7 +205,7 @@ export class VectorIndex {
         options: VectorIndexOptions = {}
     ): Promise<VectorIndex> {
         const buffer = await fs.readFile(filePath);
-        const restored = faiss.Index.fromBuffer(buffer) as faiss.IndexIDMap2;
+        const restored = faiss.Index.fromBuffer(buffer);
 
         return new VectorIndex(options, restored);
     }

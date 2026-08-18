@@ -17,8 +17,8 @@
 
 import fs from "node:fs/promises";
 
-import { createEmbedder } from "../indexing/embedder.ts";
-import { LanguageSearcher } from "../indexing/search.ts";
+import { createEmbedder } from "./embedder.ts";
+import { LanguageSearcher } from "./search.ts";
 
 const DEFAULT_QUERIES = [
     "what is the capital of France",
@@ -43,7 +43,7 @@ function percentile(sorted: number[], p: number): number {
         sorted.length - 1,
         Math.floor((p / 100) * sorted.length)
     );
-    return sorted[index];
+    return sorted[index] ?? 0;
 }
 
 function summarize(samples: number[]): { p50: number; p95: number; p99: number } {
@@ -55,7 +55,7 @@ function summarize(samples: number[]): { p50: number; p95: number; p99: number }
     };
 }
 
-function parseArgs(): { language: string; queriesFile?: string } {
+function parseArgs(): { language: string; queriesFile: string | undefined } {
     const args = process.argv.slice(2);
     let language = "en";
     let queriesFile: string | undefined;

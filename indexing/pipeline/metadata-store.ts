@@ -23,7 +23,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import Database from "better-sqlite3";
 
-import type { Chunk } from "../types.ts";
+import type { Chunk } from "./types.ts";
 
 export interface ChunkMetadata extends Chunk {
     faiss_id: number;
