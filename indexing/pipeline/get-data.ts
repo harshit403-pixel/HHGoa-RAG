@@ -30,6 +30,35 @@ export async function listParquetFiles(
 }
 
 // ─────────────────────────────────────────────
+// getParquetRowCount
+// ─────────────────────────────────────────────
+//
+// Fast point-in-time check of the total rows in the
+// parquet file using DuckDB, used for progress bars.
+// ─────────────────────────────────────────────
+
+export async function getParquetRowCount(
+    filePath: string
+): Promise<number> {
+    const db = await DuckDBInstance.create(":memory:");
+    const conn = await db.connect();
+    try {
+        const result = await conn.stream(`
+            SELECT count(*)::BIGINT as total
+            FROM read_parquet('${filePath}')
+        `);
+        const chunk = await result.fetchChunk();
+        if (chunk) {
+            const rows = chunk.getRowObjects(result.deduplicatedColumnNames());
+            return Number(rows[0]?.total ?? 0);
+        }
+        return 0;
+    } finally {
+        conn.disconnectSync();
+    }
+}
+
+// ─────────────────────────────────────────────
 // streamPassagesFromParquet (default export)
 // ─────────────────────────────────────────────
 //

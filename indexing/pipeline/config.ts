@@ -95,7 +95,7 @@ export const EMBEDDING_DIMENSION = envInt(
 // MAX_PENDING_CHUNKS below.
 export const EMBEDDING_BATCH_SIZE = envInt(
     "EMBEDDING_BATCH_SIZE",
-    64
+    32
 );
 
 // Only used when EMBEDDING_PROVIDER === "http".
@@ -201,5 +201,5 @@ export const CHECKPOINT_EVERY_N_VECTORS = envInt(
 
 export const PROGRESS_EVERY_N_PASSAGES = envInt(
     "PROGRESS_EVERY_N_PASSAGES",
-    10_000
+    100
 );

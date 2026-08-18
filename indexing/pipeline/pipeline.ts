@@ -20,7 +20,7 @@
 import path from "node:path";
 import pLimit from "p-limit";
 
-import streamPassagesFromParquet, { listParquetFiles } from "./get-data.js";
+import streamPassagesFromParquet, { listParquetFiles, getParquetRowCount } from "./get-data.js";
 import chunkPassage from "./chunk-data.js";
 import type { Chunk } from "./types.ts";
 
@@ -67,6 +67,11 @@ class ProgressTracker {
     private lastReportAt = Date.now();
     private lastReportVectors = 0;
 
+    constructor(
+        private readonly totalRows: number,
+        private readonly initialOffset: number
+    ) {}
+
     recordPassage(): void {
         this.passages++;
     }
@@ -92,11 +97,14 @@ class ProgressTracker {
 
         const memMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
 
+        const currentTotal = this.initialOffset + this.passages;
+        const percent = this.totalRows > 0 ? (currentTotal / this.totalRows * 100).toFixed(2) : "0.00";
+
         console.log(
-            `[${language}] passages=${this.passages.toLocaleString()} ` +
+            `[${language}] passages=${currentTotal.toLocaleString()}/${this.totalRows.toLocaleString()} (${percent}%) ` +
             `chunks=${this.chunks.toLocaleString()} ` +
             `vectors=${this.vectors.toLocaleString()} ` +
-            `throughput=${throughput.toFixed(0)} vec/s ` +
+            `throughput=${throughput.toFixed(1)} vec/s ` +
             `rss=${memMb}MB elapsed=${(elapsedSec / 60).toFixed(1)}min`
         );
 
@@ -163,10 +171,12 @@ async function processLanguageFile(
         path.join(paths.dir, "metadata.db")
     );
 
-    const progress = new ProgressTracker();
+    const totalRows = await getParquetRowCount(filePath).catch(() => 0);
+    const progress = new ProgressTracker(totalRows, checkpoint.rowsConsumed);
 
     console.log(
-        `[${language}] starting — resume offset: ${checkpoint.rowsConsumed.toLocaleString()} rows, ` +
+        `[${language}] starting — resume offset: ${checkpoint.rowsConsumed.toLocaleString()} / ${totalRows.toLocaleString()} rows ` +
+        `(${(totalRows > 0 ? (checkpoint.rowsConsumed / totalRows * 100).toFixed(2) : "0.00")}%), ` +
         `${checkpoint.vectorsIndexed.toLocaleString()} vectors already indexed.`
     );
 
