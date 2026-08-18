@@ -172,7 +172,7 @@ export const MAX_PENDING_CHUNKS = envInt(
 // catch up.
 export const MAX_PENDING_EMBEDDING_BATCHES = envInt(
     "MAX_PENDING_EMBEDDING_BATCHES",
-    4
+    1
 );
 
 // ─────────────────────────────────────────────

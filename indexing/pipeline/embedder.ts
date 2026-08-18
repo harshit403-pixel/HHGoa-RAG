@@ -265,6 +265,9 @@ export class MistralEmbedder implements Embedder {
                     flat.set(item.embedding, item.index * this.dimension);
                 }
 
+                // Add a small delay (e.g. 2 seconds) after successful request to prevent hitting rate limits
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+
                 return flat;
 
             } catch (error) {
@@ -276,6 +279,10 @@ export class MistralEmbedder implements Embedder {
                 attempts++;
                 // Switch to next API key
                 this.currentKeyIndex = (this.currentKeyIndex + 1) % totalKeys;
+
+                // Wait 5 seconds before trying the next key to avoid immediate cascading rate limits
+                console.log("Sleeping for 5 seconds before trying the next key/retry...");
+                await new Promise((resolve) => setTimeout(resolve, 5000));
 
                 // If we tried all keys and failed
                 if (attempts >= totalKeys) {
