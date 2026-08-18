@@ -181,9 +181,10 @@ async function processLanguageFile(
     shardIndex: number,
     offset: number,
     limit: number,
-    colorCode: string
+    colorCode: string,
+    virtualLangOverride?: string
 ): Promise<void> {
-    const language = path.basename(filePath, path.extname(filePath));
+    const language = virtualLangOverride || path.basename(filePath, path.extname(filePath));
     const shardName = `${language}_shard${shardIndex}`;
     const paths = shardPaths(shardName);
 
@@ -253,8 +254,9 @@ async function processLanguageFile(
     };
 
     const resumeOffset = checkpoint.rowsConsumed;
+    const isEnglish = language === "engtrain";
 
-    for await (const rowBatch of streamPassagesFromParquet(filePath, offset, limit)) {
+    for await (const rowBatch of streamPassagesFromParquet(filePath, offset, limit, isEnglish)) {
         logger.info(
             { language: shardName, passagesInBatch: rowBatch.length },
             `${colorCode}[${shardName}] Processing unnested batch from parquet rows\x1b[0m`
@@ -356,24 +358,40 @@ async function processLanguageFile(
 export async function runPipeline(selectedLangs?: string[]): Promise<void> {
     logger.info("Starting streaming chunk + embed + FAISS index pipeline");
 
-    let parquetFiles = await listParquetFiles(TRAIN_DIR);
-    // Sort files alphabetically to ensure deterministic order (1st file, 2nd file, etc.)
-    parquetFiles.sort((a, b) => a.localeCompare(b));
+    const allFiles = await listParquetFiles(TRAIN_DIR);
+    allFiles.sort((a, b) => a.localeCompare(b));
+
+    let parquetFiles = [...allFiles];
+    let shouldRunEnglish = false;
 
     // Filter by selected languages if provided via command-line arguments
     if (selectedLangs && selectedLangs.length > 0) {
         const normalizedSelected = selectedLangs.map((lang) => lang.toLowerCase().trim());
-        parquetFiles = parquetFiles.filter((filePath) => {
-            const langName = path.basename(filePath, path.extname(filePath)).toLowerCase();
-            return normalizedSelected.some((sel) => langName.includes(sel) || sel.includes(langName));
-        });
-        logger.info({ selectedLangs, matchedCount: parquetFiles.length }, "Filtered files by command-line arguments");
+        const hasEng = normalizedSelected.some((l) => l.includes("eng"));
+        if (hasEng) {
+            shouldRunEnglish = true;
+        }
+
+        const nonEngSelections = normalizedSelected.filter((l) => !l.includes("eng"));
+        if (nonEngSelections.length > 0) {
+            parquetFiles = parquetFiles.filter((filePath) => {
+                const langName = path.basename(filePath, path.extname(filePath)).toLowerCase();
+                return nonEngSelections.some((sel) => langName.includes(sel) || sel.includes(langName));
+            });
+        } else {
+            parquetFiles = [];
+        }
+        logger.info({ selectedLangs, matchedPhysicalCount: parquetFiles.length, shouldRunEnglish }, "Filtered files by command-line arguments");
+    } else {
+        // Run all languages + english by default when no arguments are provided
+        shouldRunEnglish = true;
     }
 
     logger.info(
         {
             directory: TRAIN_DIR,
-            fileCount: parquetFiles.length,
+            physicalFileCount: parquetFiles.length,
+            includeEnglish: shouldRunEnglish,
             concurrency: FILE_CONCURRENCY,
             indexRoot: INDEX_ROOT,
         },
@@ -408,6 +426,36 @@ export async function runPipeline(selectedLangs?: string[]): Promise<void> {
             totalRows - halfRows,
             colorCode
         ));
+    }
+
+    // 2. Add virtual English lang (engtrain) to tasks using first available physical file
+    if (shouldRunEnglish && allFiles.length > 0) {
+        const engSourceFile = allFiles[0];
+        if (engSourceFile) {
+            const totalRows = await getParquetRowCount(engSourceFile).catch(() => 0);
+            const halfRows = Math.floor(totalRows / 2);
+            const engColor = "\x1b[38;5;15m"; // Bright White for English
+
+            // English Shard 0: first 50%
+            tasks.push(() => processLanguageFile(
+                engSourceFile,
+                0,
+                0,
+                halfRows,
+                engColor,
+                "engtrain"
+            ));
+
+            // English Shard 1: second 50%
+            tasks.push(() => processLanguageFile(
+                engSourceFile,
+                1,
+                halfRows,
+                totalRows - halfRows,
+                engColor,
+                "engtrain"
+            ));
+        }
     }
 
     await Promise.all(

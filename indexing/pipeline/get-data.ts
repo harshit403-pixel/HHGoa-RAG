@@ -86,6 +86,7 @@ interface DuckDBListValue<T> {
 
 interface DuckDBStructValue {
     entries: {
+        passages?: DuckDBListValue<unknown>;
         Translated_passages?: DuckDBListValue<unknown>;
         is_selected?: DuckDBListValue<unknown>;
     };
@@ -94,9 +95,10 @@ interface DuckDBStructValue {
 export default async function* streamPassagesFromParquet(
     filePath: string,
     offset?: number,
-    limit?: number
+    limit?: number,
+    isEnglish?: boolean
 ): AsyncGenerator<PassageRow[], void, unknown> {
-    logger.info({ filePath, offset, limit }, "Starting DuckDB parquet stream reader");
+    logger.info({ filePath, offset, limit, isEnglish }, "Starting DuckDB parquet stream reader");
     const db = await DuckDBInstance.create(":memory:");
     const conn = await db.connect();
 
@@ -144,11 +146,12 @@ export default async function* streamPassagesFromParquet(
             for (const rawRow of rawRows) {
                 if (!rawRow) continue;
 
-                const targetLang = String(rawRow.target_lang ?? baseName);
+                const targetLang = isEnglish ? "engtrain" : String(rawRow.target_lang ?? baseName);
                 const passages = rawRow.passages as DuckDBStructValue | undefined;
+                const listVal = isEnglish ? passages?.entries.passages : passages?.entries.Translated_passages;
 
-                if (passages && passages.entries.Translated_passages) {
-                    const texts = passages.entries.Translated_passages.items;
+                if (passages && listVal) {
+                    const texts = listVal.items;
                     const selected = passages.entries.is_selected?.items ?? [];
 
                     for (let i = 0; i < texts.length; i++) {
