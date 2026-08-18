@@ -178,7 +178,12 @@ export default async function* streamPassagesFromParquet(
                     const selected = passages.entries.is_selected?.items ?? [];
 
                     for (let i = 0; i < texts.length; i++) {
-                        const passageText = String(texts[i] ?? "").trim();
+                        let passageText = String(texts[i] ?? "").trim();
+                        // Strip control characters, null bytes, and surrogate pairs to prevent Mistral API JSON payload errors
+                        passageText = passageText
+                            .replace(/[\x00-\x1F\x7F-\x9F\uFFFD]/g, "")
+                            .replace(/[\uD800-\uDFFF]/g, "")
+                            .trim();
                         if (!passageText) continue;
 
                         const row: PassageRow = {
