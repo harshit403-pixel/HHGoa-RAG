@@ -160,13 +160,14 @@ async function embedAndIndexBatch(
 // ─────────────────────────────────────────────
 
 async function processLanguageFile(
-    filePath: string,
-    embedder: Embedder
+    filePath: string
 ): Promise<void> {
     const language = path.basename(filePath, path.extname(filePath));
     const paths = shardPaths(language);
 
     logger.info({ language, filePath }, "Processing file end-to-end");
+
+    const embedder = createEmbedder();
 
     const checkpoint = await Checkpoint.loadOrCreate(
         paths.dir,
@@ -316,12 +317,6 @@ async function processLanguageFile(
 export async function runPipeline(): Promise<void> {
     logger.info("Starting streaming chunk + embed + FAISS index pipeline");
 
-    const embedder = createEmbedder();
-    logger.info(
-        { model: embedder.model, dimension: embedder.dimension },
-        "Created embedding model instance"
-    );
-
     const parquetFiles = await listParquetFiles(TRAIN_DIR);
     // Sort files alphabetically to ensure deterministic order (1st file, 2nd file, etc.)
     parquetFiles.sort((a, b) => a.localeCompare(b));
@@ -340,7 +335,7 @@ export async function runPipeline(): Promise<void> {
 
     await Promise.all(
         parquetFiles.map((filePath) =>
-            fileLimit(() => processLanguageFile(filePath, embedder))
+            fileLimit(() => processLanguageFile(filePath))
         )
     );
 

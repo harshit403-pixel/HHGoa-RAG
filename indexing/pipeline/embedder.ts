@@ -202,21 +202,34 @@ export class MistralEmbedder implements Embedder {
     private currentKeyIndex = 0;
 
     constructor() {
-        this.apiKeys = [
-            process.env.MISTRAL_API_KEY,
-            process.env.MISTRAL_API_KEY2,
-            process.env.MISTRAL_API_KEY3,
-            process.env.MISTRAL_API_KEY4,
-        ].map(k => k?.trim()).filter(Boolean) as string[];
+        const keys: string[] = [];
+        if (process.env.MISTRAL_API_KEY) {
+            keys.push(process.env.MISTRAL_API_KEY.trim());
+        }
+
+        let keyIndex = 2;
+        while (true) {
+            const key = process.env[`MISTRAL_API_KEY${keyIndex}`];
+            if (!key) break;
+            keys.push(key.trim());
+            keyIndex++;
+        }
+
+        this.apiKeys = keys.filter(Boolean);
 
         if (this.apiKeys.length === 0) {
             logger.error("MistralEmbedder initialization failed: No API keys configured");
             throw new Error(
                 "MistralEmbedder requires at least one API key. " +
-                "Please configure MISTRAL_API_KEY, MISTRAL_API_KEY2, MISTRAL_API_KEY3, or MISTRAL_API_KEY4."
+                "Please configure MISTRAL_API_KEY, MISTRAL_API_KEY2, MISTRAL_API_KEY3, etc."
             );
         }
-        logger.info({ totalKeys: this.apiKeys.length }, "MistralEmbedder successfully initialized");
+        // Start at a random key index to distribute load across API keys when multiple workers run
+        this.currentKeyIndex = Math.floor(Math.random() * this.apiKeys.length);
+        logger.info(
+            { totalKeys: this.apiKeys.length, startingKeyIndex: this.currentKeyIndex },
+            "MistralEmbedder successfully initialized with dynamic key discovery"
+        );
     }
 
     async embed(texts: string[]): Promise<Float32Array> {
