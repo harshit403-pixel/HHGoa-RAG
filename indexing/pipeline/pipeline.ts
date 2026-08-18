@@ -183,6 +183,19 @@ const ANSI_COLORS = [
     "\x1b[38;5;86m",  // Aquamarine
 ];
 
+let initLockPromise: Promise<void> = Promise.resolve();
+
+async function acquireInitLock(): Promise<() => void> {
+    let release: () => void = () => {};
+    const nextLock = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const currentLock = initLockPromise;
+    initLockPromise = nextLock;
+    await currentLock;
+    return release;
+}
+
 async function processLanguageFile(
     filePath: string,
     shardIndex: number,
@@ -202,28 +215,36 @@ async function processLanguageFile(
 
     const embedder = createEmbedder();
 
-    const checkpoint = await Checkpoint.loadOrCreate(
-        paths.dir,
-        shardName,
-        filePath
-    );
-
-    if (checkpoint.isCompleted) {
-        logger.info(
-            { language: shardName },
-            `${colorCode}[${shardName}] Shard already completed — skipping.\x1b[0m`
+    const release = await acquireInitLock();
+    let checkpoint;
+    let index;
+    let metadata;
+    try {
+        checkpoint = await Checkpoint.loadOrCreate(
+            paths.dir,
+            shardName,
+            filePath
         );
-        return;
+
+        if (checkpoint.isCompleted) {
+            logger.info(
+                { language: shardName },
+                `${colorCode}[${shardName}] Shard already completed — skipping.\x1b[0m`
+            );
+            return;
+        }
+
+        const indexExists = await VectorIndex.exists(paths.indexFile);
+        index = indexExists
+            ? await VectorIndex.load(paths.indexFile)
+            : VectorIndex.create();
+
+        metadata = await MetadataStore.open(
+            path.join(paths.dir, "metadata.db")
+        );
+    } finally {
+        release();
     }
-
-    const indexExists = await VectorIndex.exists(paths.indexFile);
-    const index = indexExists
-        ? await VectorIndex.load(paths.indexFile)
-        : VectorIndex.create();
-
-    const metadata = await MetadataStore.open(
-        path.join(paths.dir, "metadata.db")
-    );
 
     const progress = new ProgressTracker(limit, checkpoint.rowsConsumed, colorCode);
 
