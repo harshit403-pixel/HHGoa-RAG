@@ -195,6 +195,57 @@ export class HttpEmbedder implements Embedder {
 // sleeps for 3 minutes before retrying to respect quotas/limits.
 // ─────────────────────────────────────────────
 
+// Global API Key Coordinator to prevent concurrent requests on the same key
+// and enforce a strict 2-second cooldown between requests per key.
+class MistralKeyCoordinator {
+    private static lastUsedTime: number[] = [];
+    private static keyLocks: boolean[] = [];
+    private static apiKeys: string[] = [];
+
+    static init(keys: string[]) {
+        if (this.apiKeys.length === 0) {
+            this.apiKeys = keys;
+            this.lastUsedTime = new Array(keys.length).fill(0);
+            this.keyLocks = new Array(keys.length).fill(false);
+        }
+    }
+
+    static async acquireKey(startingIndex: number): Promise<{ apiKey: string; index: number }> {
+        const totalKeys = this.apiKeys.length;
+        let index = startingIndex % totalKeys;
+
+        while (true) {
+            let foundIndex = -1;
+            for (let i = 0; i < totalKeys; i++) {
+                const checkIndex = (index + i) % totalKeys;
+                const lastUsed = this.lastUsedTime[checkIndex] ?? 0;
+                const elapsed = Date.now() - lastUsed;
+                if (!this.keyLocks[checkIndex] && elapsed >= 2000) {
+                    foundIndex = checkIndex;
+                    break;
+                }
+            }
+
+            if (foundIndex !== -1) {
+                this.keyLocks[foundIndex] = true;
+                this.lastUsedTime[foundIndex] = Date.now();
+                const key = this.apiKeys[foundIndex];
+                if (key) {
+                    return { apiKey: key, index: foundIndex };
+                }
+            }
+
+            // Check again in 100ms
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+    }
+
+    static releaseKey(index: number, success: boolean) {
+        this.keyLocks[index] = false;
+        this.lastUsedTime[index] = Date.now(); // Cooldown starts from the release point
+    }
+}
+
 export class MistralEmbedder implements Embedder {
     readonly dimension = 1024;
     readonly model = "mistral-embed";
@@ -224,6 +275,10 @@ export class MistralEmbedder implements Embedder {
                 "Please configure MISTRAL_API_KEY, MISTRAL_API_KEY2, MISTRAL_API_KEY3, etc."
             );
         }
+
+        // Initialize the global coordinator with these keys
+        MistralKeyCoordinator.init(this.apiKeys);
+
         // Start at a random key index to distribute load across API keys when multiple workers run
         this.currentKeyIndex = Math.floor(Math.random() * this.apiKeys.length);
         logger.info(
@@ -243,11 +298,8 @@ export class MistralEmbedder implements Embedder {
         logger.info({ batchSize: texts.length }, "Sending batch of texts to Mistral API");
 
         while (true) {
-            const apiKey = this.apiKeys[this.currentKeyIndex];
-            if (!apiKey) {
-                this.currentKeyIndex = 0;
-                continue;
-            }
+            // Acquire a key that is guaranteed to be unlocked and cooled down
+            const { apiKey, index: keyIndex } = await MistralKeyCoordinator.acquireKey(this.currentKeyIndex);
 
             try {
                 const response = await fetch("https://api.mistral.ai/v1/embeddings", {
@@ -284,26 +336,29 @@ export class MistralEmbedder implements Embedder {
                 }
 
                 logger.info(
-                    { keyIndex: this.currentKeyIndex, vectorCount: result.data.length },
+                    { keyIndex, vectorCount: result.data.length },
                     "Successfully embedded batch with Mistral API"
                 );
 
-                // Add a small delay (e.g. 2 seconds) after successful request to prevent hitting rate limits
-                logger.debug("Sleeping for 2 seconds to respect rate limits...");
-                await new Promise((resolve) => setTimeout(resolve, 2000));
+                // Release key and mark it successful
+                MistralKeyCoordinator.releaseKey(keyIndex, true);
+                this.currentKeyIndex = keyIndex;
 
                 return flat;
 
             } catch (error) {
+                // Release key lock even on failure so other workers can try it
+                MistralKeyCoordinator.releaseKey(keyIndex, false);
+
                 const errMsg = error instanceof Error ? error.message : String(error);
                 logger.warn(
-                    { keyIndex: this.currentKeyIndex, error: errMsg },
+                    { keyIndex, error: errMsg },
                     "Mistral API request failed"
                 );
 
                 attempts++;
-                // Switch to next API key
-                this.currentKeyIndex = (this.currentKeyIndex + 1) % totalKeys;
+                // Switch starting index to the next key
+                this.currentKeyIndex = (keyIndex + 1) % totalKeys;
 
                 // Wait 5 seconds before trying the next key to avoid immediate cascading rate limits
                 logger.warn("Sleeping for 5 seconds before trying the next key/retry...");

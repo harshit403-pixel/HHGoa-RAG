@@ -11,6 +11,34 @@ The flow is implemented across these files:
 - Paths/config: `config.ts`
 - Resume/checkpoint: `checkpoint.ts`
 
+### Ingestion & Ingesting Pipeline Flowchart
+
+```mermaid
+flowchart TD
+    Start([Start Ingestion]) --> Scan[1. Scan & Sort 13 Parquet Files]
+    Scan --> Workers[2. Process all files in parallel with Concurrency 13]
+    Workers --> Load[3. Load/Create Checkpoint state.json]
+    
+    Load --> Stream[4. Stream Parquet via DuckDB in 20-row segments]
+    Stream --> Skip{Already Indexed?}
+    
+    Skip -- Yes --> SkipRow[Skip row & read next]
+    Skip -- No --> Unnest[5. Extract & unnest passages in JS]
+    
+    Unnest --> Splitter[6. Chunk text: Short Keep Whole / Long Recursive Splitter]
+    Splitter --> Batch[7. Slice chunks into safe batches of size 64]
+    
+    Batch --> Coordinator[8. MistralKeyCoordinator: Acquire free cooled key]
+    Coordinator --> POST[9. POST embeddings in parallel via Promise.all]
+    POST --> Release[10. Release key & enforce 2s cooldown]
+    
+    Release --> FAISS[11. Add vectors to FAISS index with stable IDs]
+    FAISS --> SQLite[12. Write chunk metadata to SQLite]
+    SQLite --> Checkpoint[13. Periodically write state.json & commit database]
+    
+    Checkpoint --> End([Ingestion Completed])
+```
+
 ### 1) It reads the Hugging Face dataset as parquet files
 
 The code scans a directory for `.parquet` files, one per language, and streams rows from DuckDB instead of loading the whole file into memory. That logic is in `get-data.ts`.
