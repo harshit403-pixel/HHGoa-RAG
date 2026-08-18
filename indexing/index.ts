@@ -10,6 +10,7 @@
 // durably indexed.
 // ─────────────────────────────────────────────
 
+import "dotenv/config";
 import { runPipeline } from "./pipeline/pipeline.js";
 
 await runPipeline();

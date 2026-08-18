@@ -186,10 +186,124 @@ export class HttpEmbedder implements Embedder {
 }
 
 // ─────────────────────────────────────────────
+// Mistral AI embedder
+// ─────────────────────────────────────────────
+//
+// Calls Mistral AI's embedding API. Rotates through up to 4
+// API keys if errors or rate limits are hit. If all keys fail,
+// sleeps for 3 minutes before retrying to respect quotas/limits.
+// ─────────────────────────────────────────────
+
+export class MistralEmbedder implements Embedder {
+    readonly dimension = 1024;
+    readonly model = "mistral-embed";
+    private readonly apiKeys: string[];
+    private currentKeyIndex = 0;
+
+    constructor() {
+        this.apiKeys = [
+            process.env.MISTRAL_API_KEY,
+            process.env.MISTRAL_API_KEY2,
+            process.env.MISTRAL_API_KEY3,
+            process.env.MISTRAL_API_KEY4,
+        ].map(k => k?.trim()).filter(Boolean) as string[];
+
+        if (this.apiKeys.length === 0) {
+            throw new Error(
+                "MistralEmbedder requires at least one API key. " +
+                "Please configure MISTRAL_API_KEY, MISTRAL_API_KEY2, MISTRAL_API_KEY3, or MISTRAL_API_KEY4."
+            );
+        }
+    }
+
+    async embed(texts: string[]): Promise<Float32Array> {
+        if (texts.length === 0) {
+            return new Float32Array(0);
+        }
+
+        let attempts = 0;
+        const totalKeys = this.apiKeys.length;
+
+        while (true) {
+            const apiKey = this.apiKeys[this.currentKeyIndex];
+            if (!apiKey) {
+                this.currentKeyIndex = 0;
+                continue;
+            }
+
+            try {
+                const response = await fetch("https://api.mistral.ai/v1/embeddings", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify({
+                        model: this.model,
+                        input: texts,
+                    }),
+                });
+
+                if (!response.ok) {
+                    const errorBody = await response.text().catch(() => "");
+                    throw new Error(
+                        `HTTP error ${response.status}: ${response.statusText} - ${errorBody}`
+                    );
+                }
+
+                interface MistralEmbeddingResponse {
+                    data: {
+                        embedding: number[];
+                        index: number;
+                    }[];
+                }
+
+                const result = (await response.json()) as MistralEmbeddingResponse;
+                const flat = new Float32Array(texts.length * this.dimension);
+
+                for (const item of result.data) {
+                    flat.set(item.embedding, item.index * this.dimension);
+                }
+
+                return flat;
+
+            } catch (error) {
+                console.warn(
+                    `Mistral API error with key index ${this.currentKeyIndex}:`,
+                    error instanceof Error ? error.message : String(error)
+                );
+
+                attempts++;
+                // Switch to next API key
+                this.currentKeyIndex = (this.currentKeyIndex + 1) % totalKeys;
+
+                // If we tried all keys and failed
+                if (attempts >= totalKeys) {
+                    console.warn("All Mistral API keys failed. Sleeping for 3 minutes before retrying...");
+                    // Wait for 3 minutes (180 seconds)
+                    await new Promise((resolve) => setTimeout(resolve, 180000));
+                    attempts = 0; // Reset attempts to try all keys again
+                } else {
+                    console.log(`Switching to API key index ${this.currentKeyIndex}...`);
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
 // Factory
 // ─────────────────────────────────────────────
 
 export function createEmbedder(): Embedder {
+    if (
+        process.env.MISTRAL_API_KEY ||
+        process.env.MISTRAL_API_KEY2 ||
+        process.env.MISTRAL_API_KEY3 ||
+        process.env.MISTRAL_API_KEY4
+    ) {
+        return new MistralEmbedder();
+    }
     if (EMBEDDING_PROVIDER === "http") {
         return new HttpEmbedder();
     }

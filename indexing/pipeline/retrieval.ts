@@ -15,6 +15,7 @@
 // representative of production traffic.
 // ─────────────────────────────────────────────
 
+import "dotenv/config";
 import fs from "node:fs/promises";
 
 import { createEmbedder } from "./embedder.ts";

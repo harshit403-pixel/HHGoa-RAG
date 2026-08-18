@@ -151,7 +151,7 @@ export const HNSW_EF_SEARCH = envInt("HNSW_EF_SEARCH", 64);
 // concurrency and peak embedding+index memory (each
 // concurrent file holds at most MAX_PENDING_CHUNKS chunks
 // in flight — see below).
-export const FILE_CONCURRENCY = envInt("FILE_CONCURRENCY", 6);
+export const FILE_CONCURRENCY = envInt("FILE_CONCURRENCY", 1);
 
 // Hard cap on chunks buffered (post-chunking, pre-embedding)
 // per file before we're forced to flush an embed+index

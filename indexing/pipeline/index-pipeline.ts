@@ -16,6 +16,7 @@
 // life of the file — no `allChunks`, no `allEmbeddings`.
 // ─────────────────────────────────────────────
 
+import "dotenv/config";
 import path from "node:path";
 import pLimit from "p-limit";
 
