@@ -64,6 +64,7 @@ export async function getParquetRowCount(
     logger.info({ filePath }, "Checking row count for Parquet file");
     const db = await createDuckDBInstance();
     const conn = await db.connect();
+    await conn.run("SET memory_limit='1GB';");
     try {
         const result = await conn.stream(`
             SELECT count(*)::BIGINT as total
@@ -118,6 +119,7 @@ export default async function* streamPassagesFromParquet(
     logger.info({ filePath, offset, limit, isEnglish }, "Starting DuckDB parquet stream reader");
     const db = await createDuckDBInstance();
     const conn = await db.connect();
+    await conn.run("SET memory_limit='2GB';");
 
     const baseName = path.basename(
         filePath,
