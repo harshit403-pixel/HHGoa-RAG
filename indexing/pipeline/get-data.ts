@@ -121,7 +121,7 @@ export default async function* streamPassagesFromParquet(
     logger.info({ filePath, offset, limit, isEnglish }, "Starting DuckDB parquet stream reader");
     const db = await createDuckDBInstance();
     const conn = await db.connect();
-    await conn.run("SET memory_limit='2GB';");
+    await conn.run("SET memory_limit='30GB';");
     const uniqueId = Math.random().toString(36).substring(2, 10);
     await conn.run(`SET temp_directory = '/tmp/duckdb_temp_stream_${uniqueId}';`);
 
