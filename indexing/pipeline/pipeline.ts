@@ -233,6 +233,8 @@ async function processLanguageFile(
             "Processing unnested batch from parquet rows"
         );
 
+        const tasks: Promise<void>[] = [];
+
         for (const row of rowBatch) {
             rowsSeen++;
 
@@ -249,13 +251,13 @@ async function processLanguageFile(
             buffer.push(...chunks);
             rowsConsumedThisRun++;
 
-            // Convert and index chunks in batches of EMBEDDING_BATCH_SIZE (32)
+            // Convert and index chunks in batches of EMBEDDING_BATCH_SIZE
             while (buffer.length >= EMBEDDING_BATCH_SIZE) {
                 const batch = buffer.slice(0, EMBEDDING_BATCH_SIZE);
                 buffer = buffer.slice(EMBEDDING_BATCH_SIZE);
 
                 const faissIdStart = checkpoint.reserveIds(batch.length);
-                await embedAndIndexBatch(
+                const task = embedAndIndexBatch(
                     batch,
                     faissIdStart,
                     embedder,
@@ -264,6 +266,7 @@ async function processLanguageFile(
                     progress,
                     language
                 );
+                tasks.push(task);
                 vectorsSinceCheckpoint += batch.length;
             }
         }
@@ -272,20 +275,29 @@ async function processLanguageFile(
         if (buffer.length > 0) {
             logger.info(
                 { language, count: buffer.length },
-                "Flushing remaining chunks for this row batch"
+                "Flushing remaining chunks for this row batch in safe batches"
             );
-            const faissIdStart = checkpoint.reserveIds(buffer.length);
-            await embedAndIndexBatch(
-                buffer,
-                faissIdStart,
-                embedder,
-                index,
-                metadata,
-                progress,
-                language
-            );
-            vectorsSinceCheckpoint += buffer.length;
-            buffer = [];
+            while (buffer.length > 0) {
+                const batch = buffer.slice(0, EMBEDDING_BATCH_SIZE);
+                buffer = buffer.slice(EMBEDDING_BATCH_SIZE);
+
+                const faissIdStart = checkpoint.reserveIds(batch.length);
+                const task = embedAndIndexBatch(
+                    batch,
+                    faissIdStart,
+                    embedder,
+                    index,
+                    metadata,
+                    progress,
+                    language
+                );
+                tasks.push(task);
+                vectorsSinceCheckpoint += batch.length;
+            }
+        }
+
+        if (tasks.length > 0) {
+            await Promise.all(tasks);
         }
 
         if (vectorsSinceCheckpoint >= CHECKPOINT_EVERY_N_VECTORS) {
