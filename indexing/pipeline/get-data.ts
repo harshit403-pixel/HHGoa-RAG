@@ -36,7 +36,24 @@ export async function listParquetFiles(
 // ─────────────────────────────────────────────
 // getParquetRowCount
 // ─────────────────────────────────────────────
-//
+
+let duckdbLockPromise: Promise<void> = Promise.resolve();
+
+async function createDuckDBInstance(): Promise<DuckDBInstance> {
+    let release: () => void = () => {};
+    const nextLock = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const currentLock = duckdbLockPromise;
+    duckdbLockPromise = nextLock;
+    await currentLock;
+    try {
+        return await DuckDBInstance.create(":memory:");
+    } finally {
+        release();
+    }
+}
+
 // Fast point-in-time check of the total rows in the
 // parquet file using DuckDB, used for progress bars.
 // ─────────────────────────────────────────────
@@ -45,7 +62,7 @@ export async function getParquetRowCount(
     filePath: string
 ): Promise<number> {
     logger.info({ filePath }, "Checking row count for Parquet file");
-    const db = await DuckDBInstance.create(":memory:");
+    const db = await createDuckDBInstance();
     const conn = await db.connect();
     try {
         const result = await conn.stream(`
@@ -99,7 +116,7 @@ export default async function* streamPassagesFromParquet(
     isEnglish?: boolean
 ): AsyncGenerator<PassageRow[], void, unknown> {
     logger.info({ filePath, offset, limit, isEnglish }, "Starting DuckDB parquet stream reader");
-    const db = await DuckDBInstance.create(":memory:");
+    const db = await createDuckDBInstance();
     const conn = await db.connect();
 
     const baseName = path.basename(

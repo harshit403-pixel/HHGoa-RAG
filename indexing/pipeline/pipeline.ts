@@ -242,6 +242,7 @@ async function processLanguageFile(
     let rowsConsumedThisRun = 0;
     let vectorsSinceCheckpoint = 0;
     let buffer: Chunk[] = [];
+    let lastCheckpointAt = Date.now();
 
     const persistCheckpoint = async (): Promise<void> => {
         logger.info({ language: shardName }, `${colorCode}[${shardName}] Persisting checkpoint to disk\x1b[0m`);
@@ -336,8 +337,13 @@ async function processLanguageFile(
             await Promise.all(tasks);
         }
 
-        if (vectorsSinceCheckpoint >= CHECKPOINT_EVERY_N_VECTORS) {
+        const timeSinceLastCheckpoint = Date.now() - lastCheckpointAt;
+        if (
+            vectorsSinceCheckpoint >= CHECKPOINT_EVERY_N_VECTORS ||
+            (vectorsSinceCheckpoint > 0 && timeSinceLastCheckpoint >= 60000)
+        ) {
             await persistCheckpoint();
+            lastCheckpointAt = Date.now();
         }
     }
 

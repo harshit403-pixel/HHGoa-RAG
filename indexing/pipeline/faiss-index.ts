@@ -182,6 +182,10 @@ export class VectorIndex {
         };
     }
 
+    mergeFrom(other: VectorIndex): void {
+        this.index.mergeFrom(other.index);
+    }
+
     /**
      * Atomic save: write to a temp file in the same directory,
      * then rename over the target. Rename is atomic on the
