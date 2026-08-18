@@ -1,0 +1,23 @@
+{
+  "name": "indexing",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@duckdb/node-api": "^1.5.5-r.4",
+    "@huggingface/hub": "^2.15.0",
+    "@langchain/textsplitters": "^1.0.1",
+    "p-limit": "^7.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12"
+  }
+}
