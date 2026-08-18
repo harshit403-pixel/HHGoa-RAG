@@ -269,12 +269,11 @@ export class MistralEmbedder implements Embedder {
             keys.push(process.env.MISTRAL_API_KEY.trim());
         }
 
-        let keyIndex = 2;
-        while (true) {
-            const key = process.env[`MISTRAL_API_KEY${keyIndex}`];
-            if (!key) break;
-            keys.push(key.trim());
-            keyIndex++;
+        for (let i = 2; i <= 50; i++) {
+            const key = process.env[`MISTRAL_API_KEY${i}`];
+            if (key && key.trim()) {
+                keys.push(key.trim());
+            }
         }
 
         this.apiKeys = keys.filter(Boolean);
@@ -397,12 +396,11 @@ export class MistralEmbedder implements Embedder {
 // ─────────────────────────────────────────────
 
 export function createEmbedder(): Embedder {
-    if (
-        process.env.MISTRAL_API_KEY ||
-        process.env.MISTRAL_API_KEY2 ||
-        process.env.MISTRAL_API_KEY3 ||
-        process.env.MISTRAL_API_KEY4
-    ) {
+    const hasMistralKeys = Object.keys(process.env).some(
+        (key) => key.startsWith("MISTRAL_API_KEY") && process.env[key]?.trim()
+    );
+
+    if (hasMistralKeys) {
         return new MistralEmbedder();
     }
     if (EMBEDDING_PROVIDER === "http") {
