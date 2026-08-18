@@ -65,6 +65,8 @@ export async function getParquetRowCount(
     const db = await createDuckDBInstance();
     const conn = await db.connect();
     await conn.run("SET memory_limit='1GB';");
+    const uniqueId = Math.random().toString(36).substring(2, 10);
+    await conn.run(`SET temp_directory = '/tmp/duckdb_temp_count_${uniqueId}';`);
     try {
         const result = await conn.stream(`
             SELECT count(*)::BIGINT as total
@@ -120,6 +122,8 @@ export default async function* streamPassagesFromParquet(
     const db = await createDuckDBInstance();
     const conn = await db.connect();
     await conn.run("SET memory_limit='2GB';");
+    const uniqueId = Math.random().toString(36).substring(2, 10);
+    await conn.run(`SET temp_directory = '/tmp/duckdb_temp_stream_${uniqueId}';`);
 
     const baseName = path.basename(
         filePath,
