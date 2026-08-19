@@ -136,9 +136,9 @@ export async function runIngest(shardIndex: number, numShards = DEFAULT_NUM_SHAR
 
     logger.info({ shardIndex, numShards, shardDir }, `${colorCode}[${shardName}] Starting aligned ingestion worker\x1b[0m`);
 
-    const limit = Math.ceil(TOTAL_ROWS / numShards);
+    const limit = 10000;
     const offset = shardIndex * limit;
-    const finalLimit = shardIndex === numShards - 1 ? TOTAL_ROWS - offset : limit;
+    const finalLimit = limit;
 
     // Determine FAISS ID namespace to avoid collisions when merging later
     // Each shard gets 50,000,000 slots
