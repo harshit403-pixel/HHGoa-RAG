@@ -202,9 +202,8 @@ export class VectorIndex {
         await fs.mkdir(dir, { recursive: true });
 
         const tmpPath = `${filePath}.tmp-${process.pid}`;
-        const buffer = this.index.toBuffer();
+        this.index.write(tmpPath);
 
-        await fs.writeFile(tmpPath, buffer);
         await fs.rename(tmpPath, filePath);
     }
 
@@ -212,8 +211,7 @@ export class VectorIndex {
         filePath: string,
         options: VectorIndexOptions = {}
     ): Promise<VectorIndex> {
-        const buffer = await fs.readFile(filePath);
-        const restored = faiss.Index.fromBuffer(buffer);
+        const restored = faiss.Index.read(filePath);
 
         return new VectorIndex(options, restored);
     }
