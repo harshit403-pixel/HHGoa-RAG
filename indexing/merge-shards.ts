@@ -27,17 +27,42 @@ export async function mergeLanguageShards(language: string) {
     await fs.rm(targetDir, { recursive: true, force: true });
     await fs.mkdir(targetDir, { recursive: true });
 
-    // 2. Initialize target index.faiss by loading shard0 and merging shard1
+    // 2. Initialize target index.faiss by loading shard0 and shard1, reconstructing vectors, and building a new index
     console.log(`Merging FAISS indexes...`);
     const index0 = await VectorIndex.load(path.join(shard0Dir, "index.faiss"));
     const index1 = await VectorIndex.load(path.join(shard1Dir, "index.faiss"));
-    
-    const initialCount = index0.ntotal;
-    index0.mergeFrom(index1);
-    const finalCount = index0.ntotal;
-    
-    await index0.save(path.join(targetDir, "index.faiss"));
-    console.log(`FAISS index merged successfully. Total vectors: ${initialCount} -> ${finalCount}`);
+
+    const db0 = new Database(path.join(shard0Dir, "metadata.db"));
+    const rows0 = db0.prepare("SELECT faiss_id FROM chunks").all() as { faiss_id: number | bigint }[];
+    const ids0 = rows0.map(r => BigInt(r.faiss_id));
+    db0.close();
+
+    const db1 = new Database(path.join(shard1Dir, "metadata.db"));
+    const rows1 = db1.prepare("SELECT faiss_id FROM chunks").all() as { faiss_id: number | bigint }[];
+    const ids1 = rows1.map(r => BigInt(r.faiss_id));
+    db1.close();
+
+    const mergedIndex = VectorIndex.create();
+    const BATCH_SIZE = 50000;
+
+    // Merge shard 0 vectors
+    for (let i = 0; i < ids0.length; i += BATCH_SIZE) {
+        const slice = ids0.slice(i, i + BATCH_SIZE);
+        console.log(`  Reconstructing Shard 0 vectors [${i} to ${Math.min(i + BATCH_SIZE, ids0.length)}]...`);
+        const vectors = index0.reconstructBatch(slice);
+        mergedIndex.addBatch(slice, new Float32Array(vectors));
+    }
+
+    // Merge shard 1 vectors
+    for (let i = 0; i < ids1.length; i += BATCH_SIZE) {
+        const slice = ids1.slice(i, i + BATCH_SIZE);
+        console.log(`  Reconstructing Shard 1 vectors [${i} to ${Math.min(i + BATCH_SIZE, ids1.length)}]...`);
+        const vectors = index1.reconstructBatch(slice);
+        mergedIndex.addBatch(slice, new Float32Array(vectors));
+    }
+
+    await mergedIndex.save(path.join(targetDir, "index.faiss"));
+    console.log(`FAISS index merged successfully. Total vectors: ${mergedIndex.ntotal}`);
 
     // 3. Copy shard0's metadata.db to target and attach/merge shard1
     console.log(`Merging SQLite databases...`);

@@ -186,6 +186,10 @@ export class VectorIndex {
         this.index.mergeFrom(other.index);
     }
 
+    reconstructBatch(ids: bigint[]): number[] {
+        return this.index.reconstructBatch(ids);
+    }
+
     /**
      * Atomic save: write to a temp file in the same directory,
      * then rename over the target. Rename is atomic on the
