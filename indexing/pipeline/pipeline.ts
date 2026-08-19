@@ -38,7 +38,7 @@ import { createEmbedder, type Embedder } from "./embedder.js";
 import { VectorIndex } from "./faiss-index.js";
 import { MetadataStore } from "./metadata-store.js";
 import { Checkpoint } from "./checkpoint.js";
-import { mergeLanguageShards } from "../merge-shards.js";
+import { mergeLanguageShards } from "./merge-helper.js";
 
 // ─────────────────────────────────────────────
 // Per-language shard paths
