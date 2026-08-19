@@ -32,17 +32,17 @@ Replace `/your/custom/input/folder/path` and `/your/custom/output/folder/path` w
 TRAIN_DIR=/data/hfData/train     # The directory where the parquet files are stored
 INDEX_ROOT=./indexes             # MANDATORY: Must be set to ./indexes to commit the index to Git!
 
-# 2. Embedding Model (For 384-dimensions - Fast and fits in 512MB RAM)
-EMBEDDING_DIMENSION=384
-EMBEDDING_MODEL=Xenova/bge-small-en-v1.5
-EMBEDDING_PROVIDER=local
+# 2. Embedding Model (For 1024d Mistral API)
+EMBEDDING_DIMENSION=1024
+EMBEDDING_MODEL=mistral-embed
 
-# 3. Mistral API keys (Disable them for 384-dimensions by removing or commenting them out)
-# MISTRAL_API_KEY1=...
-# MISTRAL_API_KEY2=...
+# 3. Mistral API keys (Provide your 50 keys here)
+MISTRAL_API_KEY1=your_first_mistral_api_key_here
+MISTRAL_API_KEY2=your_second_mistral_api_key_here
+# ... add keys up to MISTRAL_API_KEY50
 ```
 
-*Note: If you want to use the high-quality 1024-dimension Mistral API model, keep `EMBEDDING_DIMENSION=1024` and define your 50 keys (`MISTRAL_API_KEY1` to `MISTRAL_API_KEY50`) in the `.env`!*
+*Note: If you ever want to run a completely local CPU-only model without API keys, you can set `EMBEDDING_DIMENSION=384`, `EMBEDDING_MODEL=Xenova/bge-small-en-v1.5`, and `EMBEDDING_PROVIDER=local`.*
 
 ---
 
