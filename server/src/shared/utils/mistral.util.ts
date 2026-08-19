@@ -4,8 +4,9 @@ import logger from "../config/logger.config.js";
 const apiKeys: string[] = [];
 
 // Load keys using the exact same priority/logic
-if (env.MISTRAL_API_KEY || process.env.MISTRAL_API_KEY) {
-    apiKeys.push((env.MISTRAL_API_KEY || process.env.MISTRAL_API_KEY || "").trim());
+const firstKey = env.MISTRAL_API_KEY || process.env.MISTRAL_API_KEY || process.env.MISTRAL_API_KEY1;
+if (firstKey) {
+    apiKeys.push(firstKey.trim());
 }
 for (let i = 2; i <= 50; i++) {
     const key = process.env[`MISTRAL_API_KEY${i}`];

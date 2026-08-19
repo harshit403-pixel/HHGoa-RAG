@@ -277,8 +277,9 @@ export class MistralEmbedder implements Embedder {
         let keys: string[] = [];
         const allKeys: string[] = [];
 
-        if (process.env.MISTRAL_API_KEY) {
-            allKeys.push(process.env.MISTRAL_API_KEY.trim());
+        const firstKey = process.env.MISTRAL_API_KEY || process.env.MISTRAL_API_KEY1;
+        if (firstKey) {
+            allKeys.push(firstKey.trim());
         }
 
         for (let i = 2; i <= 100; i++) {
