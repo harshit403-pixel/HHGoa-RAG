@@ -78,7 +78,7 @@ export async function runInject(): Promise<void> {
         let batchBuffer: any[] = [];
         let totalInjected = 0;
 
-        for await (const rowBatch of streamPassagesFromParquet(filePath, 0, 100000, false)) {
+        for await (const rowBatch of streamPassagesFromParquet(filePath, 0, 30000, false)) {
             for (const row of rowBatch) {
                 batchBuffer.push(row);
 

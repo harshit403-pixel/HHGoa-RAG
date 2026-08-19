@@ -6,7 +6,7 @@ import path from "node:path";
 import { INDEX_ROOT } from "./pipeline/config.ts";
 
 const NUM_SHARDS = 10;
-const SHARD_SIZE = 10000;
+const SHARD_SIZE = 3000;
 const TOTAL_ROWS = NUM_SHARDS * SHARD_SIZE;
 
 async function main() {
