@@ -10,7 +10,7 @@ import logger from "./logger.ts";
 import type { Chunk } from "./types.ts";
 
 const TOTAL_ROWS = 778638;
-const DEFAULT_NUM_SHARDS = 9;
+const DEFAULT_NUM_SHARDS = 10;
 
 const SCHEMA = `
     CREATE TABLE IF NOT EXISTS chunks (
@@ -155,7 +155,7 @@ export async function runIngest(shardIndex: number, numShards = DEFAULT_NUM_SHAR
     }
 
     // Initialize Embedder, FAISS Index, and Metadata SQLite database
-    const embedder = createEmbedder();
+    const embedder = createEmbedder(shardIndex);
     const indexFile = path.join(shardDir, "index.faiss");
     const dbFile = path.join(shardDir, "metadata.db");
 

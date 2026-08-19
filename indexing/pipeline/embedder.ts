@@ -273,20 +273,38 @@ export class MistralEmbedder implements Embedder {
     private readonly apiKeys: string[];
     private currentKeyIndex = 0;
 
-    constructor() {
-        const keys: string[] = [];
+    constructor(shardIndex?: number) {
+        let keys: string[] = [];
+        const allKeys: string[] = [];
+
         if (process.env.MISTRAL_API_KEY) {
-            keys.push(process.env.MISTRAL_API_KEY.trim());
+            allKeys.push(process.env.MISTRAL_API_KEY.trim());
         }
 
-        for (let i = 2; i <= 50; i++) {
+        for (let i = 2; i <= 100; i++) {
             const key = process.env[`MISTRAL_API_KEY${i}`];
             if (key && key.trim()) {
-                keys.push(key.trim());
+                allKeys.push(key.trim());
             }
         }
 
-        this.apiKeys = keys.filter(Boolean);
+        const workingKeys = allKeys.filter(Boolean);
+
+        if (shardIndex !== undefined && workingKeys.length > 0) {
+            // Allocate 5 keys to this worker, wrapping around if there are fewer than 50 keys
+            const startIdx = (shardIndex * 5) % workingKeys.length;
+            for (let k = 0; k < 5; k++) {
+                const idx = (startIdx + k) % workingKeys.length;
+                const key = workingKeys[idx];
+                if (key && !keys.includes(key)) {
+                    keys.push(key);
+                }
+            }
+        } else {
+            keys = workingKeys;
+        }
+
+        this.apiKeys = keys;
 
         if (this.apiKeys.length === 0) {
             logger.error("MistralEmbedder initialization failed: No API keys configured");
@@ -416,13 +434,13 @@ export class MistralEmbedder implements Embedder {
 // Factory
 // ─────────────────────────────────────────────
 
-export function createEmbedder(): Embedder {
+export function createEmbedder(shardIndex?: number): Embedder {
     const hasMistralKeys = Object.keys(process.env).some(
         (key) => key.startsWith("MISTRAL_API_KEY") && process.env[key]?.trim()
     );
 
     if (hasMistralKeys) {
-        return new MistralEmbedder();
+        return new MistralEmbedder(shardIndex);
     }
     if (EMBEDDING_PROVIDER === "http") {
         return new HttpEmbedder();
