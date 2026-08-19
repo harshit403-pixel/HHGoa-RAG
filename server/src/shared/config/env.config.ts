@@ -7,7 +7,10 @@ config();
 const envSchema = z.object({
     PORT: z.coerce.number().default(envConstants.PORT),
     NODE_ENV: z.enum(['development', 'production', 'test']).default(envConstants.NODE_ENV),
-    CORS_ORIGIN: z.string().default(envConstants.CORS_ORIGIN)
+    CORS_ORIGIN: z.string().default(envConstants.CORS_ORIGIN),
+    MISTRAL_API_KEY: z.string().optional(),
+    SARVAM_API_KEY: z.string().optional(),
+    INDEX_ROOT: z.string().default('/data/hhgoa/indexes')
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
