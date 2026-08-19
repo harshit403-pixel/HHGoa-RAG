@@ -41,7 +41,7 @@ export async function mergeLanguageShards(language: string) {
     const mergedIndex = VectorIndex.create();
     const BATCH_SIZE = 50000;
 
-    // Merge shard 0 vectors (IDs are contiguous from 0 to n0 - 1)
+    // Merge shard 0 vectors (IDs are contiguous locally from 0 to n0 - 1)
     for (let i = 0; i < n0; i += BATCH_SIZE) {
         const batchLimit = Math.min(i + BATCH_SIZE, n0);
         const slice: bigint[] = [];
@@ -53,17 +53,28 @@ export async function mergeLanguageShards(language: string) {
         mergedIndex.addBatch(slice, new Float32Array(vectors));
     }
 
-    // Merge shard 1 vectors (IDs are contiguous from 500000000 to 500000000 + n1 - 1)
+    // Merge shard 1 vectors
+    // Local IDs in index1 are [0 to n1 - 1]
+    // Merged IDs are shifted by 500,000,000 to prevent collisions
     const shard1Start = 500000000;
     for (let i = 0; i < n1; i += BATCH_SIZE) {
         const batchLimit = Math.min(i + BATCH_SIZE, n1);
-        const slice: bigint[] = [];
+        
+        // Retrieve using local IDs [0 to n1 - 1]
+        const localSlice: bigint[] = [];
         for (let j = i; j < batchLimit; j++) {
-            slice.push(BigInt(shard1Start + j));
+            localSlice.push(BigInt(j));
         }
+        
+        // Add using shifted IDs [shard1Start to shard1Start + n1 - 1]
+        const shiftedSlice: bigint[] = [];
+        for (let j = i; j < batchLimit; j++) {
+            shiftedSlice.push(BigInt(shard1Start + j));
+        }
+
         console.log(`  Reconstructing Shard 1 vectors [${i} to ${batchLimit}]...`);
-        const vectors = index1.reconstructBatch(slice);
-        mergedIndex.addBatch(slice, new Float32Array(vectors));
+        const vectors = index1.reconstructBatch(localSlice);
+        mergedIndex.addBatch(shiftedSlice, new Float32Array(vectors));
     }
 
     await mergedIndex.save(path.join(targetDir, "index.faiss"));
@@ -84,18 +95,22 @@ export async function mergeLanguageShards(language: string) {
         console.log(`Removed ${clean0.changes} orphaned chunks from Shard 0 SQLite database.`);
     }
 
-    // Attach and insert shard1 rows
+    // Attach and insert shard1 rows with shifted faiss_ids
     db.exec(`ATTACH DATABASE '${shard1DbFile}' AS shard1Db`);
 
     const initialRows = (db.prepare("SELECT count(*) as count FROM chunks").get() as any).count;
     
-    // Insert only valid rows from shard1 (faiss_id in [500000000, 500000000 + n1))
+    // Insert valid rows from shard1, shifting faiss_id to match the merged FAISS index space
     const stmt = db.prepare(`
-        INSERT OR REPLACE INTO chunks 
-        SELECT * FROM shard1Db.chunks 
-        WHERE faiss_id >= ? AND faiss_id < ?
+        INSERT OR REPLACE INTO chunks (
+            faiss_id, chunk_id, parent_id, text, query_id, language, passage_index, is_selected, chunk_index, chunk_type
+        )
+        SELECT 
+            faiss_id + ?, chunk_id, parent_id, text, query_id, language, passage_index, is_selected, chunk_index, chunk_type
+        FROM shard1Db.chunks 
+        WHERE faiss_id < ?
     `);
-    const res1 = stmt.run(shard1Start, shard1Start + n1);
+    const res1 = stmt.run(shard1Start, n1);
     
     const finalRows = (db.prepare("SELECT count(*) as count FROM chunks").get() as any).count;
 
@@ -116,7 +131,7 @@ export async function mergeLanguageShards(language: string) {
             sourceFile: state0.sourceFile,
             rowsConsumed: state0.rowsConsumed + state1.rowsConsumed,
             vectorsIndexed: state0.vectorsIndexed + state1.vectorsIndexed,
-            nextFaissId: Math.max(state0.nextFaissId, state1.nextFaissId),
+            nextFaissId: Math.max(state0.nextFaissId, state1.nextFaissId + shard1Start),
             completed: state0.completed && state1.completed,
             updatedAt: new Date().toISOString()
         };
