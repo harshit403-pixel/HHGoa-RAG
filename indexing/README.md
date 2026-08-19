@@ -49,21 +49,30 @@ MISTRAL_API_KEY2=your_second_mistral_api_key_here
 ### Step 3: Run the Ingestion Workers (Shards 0-9)
 We split the embedding task into 10 parallel segments (shards) containing 3,000 rows each (total 30,000 rows).
 
-1. Open 10 different terminal tabs/screens.
-2. In each tab, navigate to the `indexing/` directory and run one of the following commands:
-   * **Terminal 0**: `npx tsx aligned-index.ts shard 0`
-   * **Terminal 1**: `npx tsx aligned-index.ts shard 1`
-   * **Terminal 2**: `npx tsx aligned-index.ts shard 2`
-   * **Terminal 3**: `npx tsx aligned-index.ts shard 3`
-   * **Terminal 4**: `npx tsx aligned-index.ts shard 4`
-   * **Terminal 5**: `npx tsx aligned-index.ts shard 5`
-   * **Terminal 6**: `npx tsx aligned-index.ts shard 6`
-   * **Terminal 7**: `npx tsx aligned-index.ts shard 7`
-   * **Terminal 8**: `npx tsx aligned-index.ts shard 8`
-   * **Terminal 9**: `npx tsx aligned-index.ts shard 9`
+You can run them in separate terminals (recommended for safety so you can watch for crashes/errors) or launch them all at once in the background.
+
+#### Option A: Separate Terminals (Safer, Recommended)
+Open 10 terminal windows/tabs and run:
+* **Terminal 0**: `npx tsx aligned-index.ts shard 0`
+* **Terminal 1**: `npx tsx aligned-index.ts shard 1`
+* **Terminal 2**: `npx tsx aligned-index.ts shard 2`
+* **Terminal 3**: `npx tsx aligned-index.ts shard 3`
+* **Terminal 4**: `npx tsx aligned-index.ts shard 4`
+* **Terminal 5**: `npx tsx aligned-index.ts shard 5`
+* **Terminal 6**: `npx tsx aligned-index.ts shard 6`
+* **Terminal 7**: `npx tsx aligned-index.ts shard 7`
+* **Terminal 8**: `npx tsx aligned-index.ts shard 8`
+* **Terminal 9**: `npx tsx aligned-index.ts shard 9`
+
+#### Option B: Single Background Command (Quickest)
+Run this single command to start all 10 workers in the background (logs will be saved to `shard_0.log`, `shard_1.log`, etc.):
+```bash
+for i in {0..9}; do npx tsx aligned-index.ts shard $i > shard_$i.log 2>&1 & done
+```
+*(To stop all background workers at any time, run: `pkill -f aligned-index.ts`)*
 
 #### 📊 How to check progress:
-You can run this command at any time in a separate terminal to see the live overall and per-shard completion percentages:
+You can check completion percentages at any time by running:
 ```bash
 npx tsx aligned-index.ts status
 ```
