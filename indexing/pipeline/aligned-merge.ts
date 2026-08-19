@@ -6,7 +6,7 @@ import { VectorIndex } from "./faiss-index.ts";
 import { INDEX_ROOT } from "./config.ts";
 import logger from "./logger.ts";
 
-const DEFAULT_NUM_SHARDS = 10;
+const DEFAULT_NUM_SHARDS = 9;
 const BATCH_SIZE = 50000;
 
 const SCHEMA = `

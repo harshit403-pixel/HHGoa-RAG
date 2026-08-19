@@ -10,7 +10,7 @@ import logger from "./logger.ts";
 import type { Chunk } from "./types.ts";
 
 const TOTAL_ROWS = 778638;
-const DEFAULT_NUM_SHARDS = 10;
+const DEFAULT_NUM_SHARDS = 9;
 
 const SCHEMA = `
     CREATE TABLE IF NOT EXISTS chunks (
