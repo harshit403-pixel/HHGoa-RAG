@@ -211,6 +211,7 @@ export class HttpEmbedder implements Embedder {
 class MistralKeyCoordinator {
     private static lastUsedTime: number[] = [];
     private static keyLocks: boolean[] = [];
+    private static disabledKeys: boolean[] = [];
     private static apiKeys: string[] = [];
 
     static init(keys: string[]) {
@@ -218,6 +219,13 @@ class MistralKeyCoordinator {
             this.apiKeys = keys;
             this.lastUsedTime = new Array(keys.length).fill(0);
             this.keyLocks = new Array(keys.length).fill(false);
+            this.disabledKeys = new Array(keys.length).fill(false);
+        }
+    }
+
+    static disableKey(index: number) {
+        if (this.disabledKeys[index] !== undefined) {
+            this.disabledKeys[index] = true;
         }
     }
 
@@ -231,7 +239,9 @@ class MistralKeyCoordinator {
                 const checkIndex = (index + i) % totalKeys;
                 const lastUsed = this.lastUsedTime[checkIndex] ?? 0;
                 const elapsed = Date.now() - lastUsed;
-                if (!this.keyLocks[checkIndex] && elapsed >= 2000) {
+                
+                // Skip if locked, disabled, or not cooled down
+                if (!this.keyLocks[checkIndex] && !this.disabledKeys[checkIndex] && elapsed >= 2000) {
                     foundIndex = checkIndex;
                     break;
                 }
@@ -366,13 +376,24 @@ export class MistralEmbedder implements Embedder {
                     "Mistral API request failed"
                 );
 
+                const isAuthError = errMsg.includes("HTTP error 401") || errMsg.includes("HTTP error 403");
+                if (isAuthError) {
+                    logger.error(
+                        { keyIndex, error: errMsg },
+                        "Mistral API key is unauthorized or invalid (401/403). Permanently disabling key."
+                    );
+                    MistralKeyCoordinator.disableKey(keyIndex);
+                }
+
                 attempts++;
                 // Switch starting index to the next key
                 this.currentKeyIndex = (keyIndex + 1) % totalKeys;
 
-                // Wait 5 seconds before trying the next key to avoid immediate cascading rate limits
-                logger.warn("Sleeping for 5 seconds before trying the next key/retry...");
-                await new Promise((resolve) => setTimeout(resolve, 5000));
+                // Only sleep 5 seconds if this is a rate limit or network issue (not static authentication error)
+                if (!isAuthError) {
+                    logger.warn("Sleeping for 5 seconds before trying the next key/retry...");
+                    await new Promise((resolve) => setTimeout(resolve, 5000));
+                }
 
                 // If we tried all keys and failed
                 if (attempts >= totalKeys) {
