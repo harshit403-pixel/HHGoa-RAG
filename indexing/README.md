@@ -1,3 +1,102 @@
+# Aligned Multilingual Ingestion & Search Indexing Pipeline
+
+This guide explains how to set up, run, and commit the aligned English-only indexing pipeline with 10-shard parallel workers and local translation injection.
+
+---
+
+## 🚀 Quick Start Guide (For Non-Technical Users)
+
+Follow these exact steps to run the pipeline and upload the finished index to GitHub.
+
+### Step 1: Install Git LFS (Large File Storage)
+Since the generated index files are too large for standard Git, we use Git LFS to upload them. Run this command once in your terminal:
+```bash
+git lfs install
+```
+
+Track index and database files with LFS:
+```bash
+git lfs track "*.faiss"
+git lfs track "*.db"
+```
+
+---
+
+### Step 2: Configure the Environment (`.env`)
+Create a file named `.env` in the `indexing/` directory (or edit the existing one) and paste the following configuration.
+
+Replace `/your/custom/input/folder/path` and `/your/custom/output/folder/path` with the actual folder paths on your VM:
+
+```env
+# 1. Folder Paths
+TRAIN_DIR=/data/hfData/train     # The directory where the parquet files are stored
+INDEX_ROOT=./indexes             # MANDATORY: Must be set to ./indexes to commit the index to Git!
+
+# 2. Embedding Model (For 384-dimensions - Fast and fits in 512MB RAM)
+EMBEDDING_DIMENSION=384
+EMBEDDING_MODEL=Xenova/bge-small-en-v1.5
+EMBEDDING_PROVIDER=local
+
+# 3. Mistral API keys (Disable them for 384-dimensions by removing or commenting them out)
+# MISTRAL_API_KEY1=...
+# MISTRAL_API_KEY2=...
+```
+
+*Note: If you want to use the high-quality 1024-dimension Mistral API model, keep `EMBEDDING_DIMENSION=1024` and define your 50 keys (`MISTRAL_API_KEY1` to `MISTRAL_API_KEY50`) in the `.env`!*
+
+---
+
+### Step 3: Run the Ingestion Workers (Shards 0-9)
+We split the embedding task into 10 parallel segments (shards) containing 3,000 rows each (total 30,000 rows).
+
+1. Open 10 different terminal tabs/screens.
+2. In each tab, navigate to the `indexing/` directory and run one of the following commands:
+   * **Terminal 0**: `npx tsx aligned-index.ts shard 0`
+   * **Terminal 1**: `npx tsx aligned-index.ts shard 1`
+   * **Terminal 2**: `npx tsx aligned-index.ts shard 2`
+   * **Terminal 3**: `npx tsx aligned-index.ts shard 3`
+   * **Terminal 4**: `npx tsx aligned-index.ts shard 4`
+   * **Terminal 5**: `npx tsx aligned-index.ts shard 5`
+   * **Terminal 6**: `npx tsx aligned-index.ts shard 6`
+   * **Terminal 7**: `npx tsx aligned-index.ts shard 7`
+   * **Terminal 8**: `npx tsx aligned-index.ts shard 8`
+   * **Terminal 9**: `npx tsx aligned-index.ts shard 9`
+
+#### 📊 How to check progress:
+You can run this command at any time in a separate terminal to see the live overall and per-shard completion percentages:
+```bash
+npx tsx aligned-index.ts status
+```
+
+---
+
+### Step 4: Merge the Shards
+Once all 10 shards show `✅ Completed` in the status log, combine them into a single index file:
+```bash
+npx tsx aligned-index.ts merge
+```
+
+---
+
+### Step 5: Inject Translation Metadata
+This step reads all 13 translation languages and syncs them into the database. It runs completely locally on your CPU and takes under 1 minute:
+```bash
+npx tsx aligned-index.ts inject
+```
+
+---
+
+### Step 6: Commit and Push to GitHub
+Now that the index files are built inside `indexes/aligned_english`, commit them using LFS and push to Git:
+
+```bash
+git add .gitattributes indexes/aligned_english/
+git commit -m "Build and upload aligned 30k English-only index"
+git push
+```
+
+---
+
 ## How the indexing pipeline works
 
 The flow is implemented across these files:
@@ -197,5 +296,3 @@ So the vector DB is not storing text in FAISS itself. FAISS stores numeric vecto
     - save the FAISS index
     - checkpoint SQLite WAL
     - save `state.json`
-
-This is all orchestrated in `index-pipeline.ts`, and the resume behavior is managed by `checkpoint.ts`.
