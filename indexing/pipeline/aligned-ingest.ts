@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 import streamPassagesFromParquet from "./get-data.ts";
 import { createEmbedder } from "./embedder.ts";
 import { VectorIndex } from "./faiss-index.ts";
-import { INDEX_ROOT, EMBEDDING_BATCH_SIZE } from "./config.ts";
+import { INDEX_ROOT, EMBEDDING_BATCH_SIZE, TRAIN_DIR } from "./config.ts";
 import logger from "./logger.ts";
 import type { Chunk } from "./types.ts";
 
@@ -168,7 +168,7 @@ export async function runIngest(shardIndex: number, numShards = DEFAULT_NUM_SHAR
 
     const metadata = new AlignedMetadataStore(dbFile);
 
-    const asmtrainPath = path.join("/data/hfData/train", "asmtrain.parquet");
+    const asmtrainPath = path.join(TRAIN_DIR, "asmtrain.parquet");
     const resumeOffset = checkpoint.rowsConsumed;
 
     let rowsSeen = 0;

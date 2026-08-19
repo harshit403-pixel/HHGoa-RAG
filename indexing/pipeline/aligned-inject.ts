@@ -3,7 +3,7 @@ import fsSync from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import streamPassagesFromParquet from "./get-data.ts";
-import { INDEX_ROOT } from "./config.ts";
+import { INDEX_ROOT, TRAIN_DIR } from "./config.ts";
 import logger from "./logger.ts";
 
 const TOTAL_ROWS = 778638;
@@ -57,7 +57,7 @@ export async function runInject(): Promise<void> {
         }
     });
 
-    const trainDir = "/data/hfData/train";
+    const trainDir = TRAIN_DIR;
     const files = fsSync.readdirSync(trainDir)
         .filter(f => f.endsWith(".parquet"))
         .sort();
