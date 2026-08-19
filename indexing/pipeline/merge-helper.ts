@@ -32,31 +32,36 @@ export async function mergeLanguageShards(language: string) {
     const index0 = await VectorIndex.load(path.join(shard0Dir, "index.faiss"));
     const index1 = await VectorIndex.load(path.join(shard1Dir, "index.faiss"));
 
-    const db0 = new Database(path.join(shard0Dir, "metadata.db"));
-    const rows0 = db0.prepare("SELECT faiss_id FROM chunks").all() as { faiss_id: number | bigint }[];
-    const ids0 = rows0.map(r => BigInt(r.faiss_id));
-    db0.close();
-
-    const db1 = new Database(path.join(shard1Dir, "metadata.db"));
-    const rows1 = db1.prepare("SELECT faiss_id FROM chunks").all() as { faiss_id: number | bigint }[];
-    const ids1 = rows1.map(r => BigInt(r.faiss_id));
-    db1.close();
+    const n0 = index0.ntotal;
+    const n1 = index1.ntotal;
+    
+    console.log(`Shard 0 vectors: ${n0}`);
+    console.log(`Shard 1 vectors: ${n1}`);
 
     const mergedIndex = VectorIndex.create();
     const BATCH_SIZE = 50000;
 
-    // Merge shard 0 vectors
-    for (let i = 0; i < ids0.length; i += BATCH_SIZE) {
-        const slice = ids0.slice(i, i + BATCH_SIZE);
-        console.log(`  Reconstructing Shard 0 vectors [${i} to ${Math.min(i + BATCH_SIZE, ids0.length)}]...`);
+    // Merge shard 0 vectors (IDs are contiguous from 0 to n0 - 1)
+    for (let i = 0; i < n0; i += BATCH_SIZE) {
+        const batchLimit = Math.min(i + BATCH_SIZE, n0);
+        const slice: bigint[] = [];
+        for (let j = i; j < batchLimit; j++) {
+            slice.push(BigInt(j));
+        }
+        console.log(`  Reconstructing Shard 0 vectors [${i} to ${batchLimit}]...`);
         const vectors = index0.reconstructBatch(slice);
         mergedIndex.addBatch(slice, new Float32Array(vectors));
     }
 
-    // Merge shard 1 vectors
-    for (let i = 0; i < ids1.length; i += BATCH_SIZE) {
-        const slice = ids1.slice(i, i + BATCH_SIZE);
-        console.log(`  Reconstructing Shard 1 vectors [${i} to ${Math.min(i + BATCH_SIZE, ids1.length)}]...`);
+    // Merge shard 1 vectors (IDs are contiguous from 500000000 to 500000000 + n1 - 1)
+    const shard1Start = 500000000;
+    for (let i = 0; i < n1; i += BATCH_SIZE) {
+        const batchLimit = Math.min(i + BATCH_SIZE, n1);
+        const slice: bigint[] = [];
+        for (let j = i; j < batchLimit; j++) {
+            slice.push(BigInt(shard1Start + j));
+        }
+        console.log(`  Reconstructing Shard 1 vectors [${i} to ${batchLimit}]...`);
         const vectors = index1.reconstructBatch(slice);
         mergedIndex.addBatch(slice, new Float32Array(vectors));
     }
@@ -72,12 +77,26 @@ export async function mergeLanguageShards(language: string) {
     // Copy file first to keep schema and shard0 rows
     await fs.copyFile(path.join(shard0Dir, "metadata.db"), targetDbFile);
 
-    // Attach and insert shard1 rows
+    // Open target db and delete any orphaned metadata rows exceeding FAISS index size
     const db = new Database(targetDbFile);
+    const clean0 = db.prepare("DELETE FROM chunks WHERE faiss_id >= ?").run(n0);
+    if (clean0.changes > 0) {
+        console.log(`Removed ${clean0.changes} orphaned chunks from Shard 0 SQLite database.`);
+    }
+
+    // Attach and insert shard1 rows
     db.exec(`ATTACH DATABASE '${shard1DbFile}' AS shard1Db`);
 
     const initialRows = (db.prepare("SELECT count(*) as count FROM chunks").get() as any).count;
-    db.exec(`INSERT OR REPLACE INTO chunks SELECT * FROM shard1Db.chunks`);
+    
+    // Insert only valid rows from shard1 (faiss_id in [500000000, 500000000 + n1))
+    const stmt = db.prepare(`
+        INSERT OR REPLACE INTO chunks 
+        SELECT * FROM shard1Db.chunks 
+        WHERE faiss_id >= ? AND faiss_id < ?
+    `);
+    const res1 = stmt.run(shard1Start, shard1Start + n1);
+    
     const finalRows = (db.prepare("SELECT count(*) as count FROM chunks").get() as any).count;
 
     db.exec(`DETACH DATABASE shard1Db`);
