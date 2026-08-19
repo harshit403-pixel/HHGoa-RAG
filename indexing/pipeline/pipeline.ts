@@ -63,6 +63,7 @@ class ProgressTracker {
     private passages = 0;
     private chunks = 0;
     private vectors = 0;
+    private currentRawRow = 0;
     private readonly startedAt = Date.now();
     private lastReportAt = Date.now();
     private lastReportVectors = 0;
@@ -86,6 +87,10 @@ class ProgressTracker {
         this.vectors += n;
     }
 
+    updateRawRow(n: number): void {
+        this.currentRawRow = n;
+    }
+
     maybeReport(language: string, force = false): void {
         const now = Date.now();
         const timeSinceLast = now - this.lastReportAt;
@@ -105,13 +110,14 @@ class ProgressTracker {
         const memMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
 
         const currentTotal = this.initialOffset + this.passages;
-        const percent = this.totalRows > 0 ? (currentTotal / this.totalRows * 100).toFixed(2) : "0.00";
+        const percent = this.totalRows > 0 ? (this.currentRawRow / this.totalRows * 100).toFixed(2) : "0.00";
 
         logger.info(
             {
                 language,
-                progress: `${currentTotal.toLocaleString()}/${this.totalRows.toLocaleString()}`,
+                progress: `${this.currentRawRow.toLocaleString()}/${this.totalRows.toLocaleString()} rows`,
                 percent: `${percent}%`,
+                passages: currentTotal,
                 chunks: this.chunks,
                 vectors: this.vectors,
                 throughput: `${throughput.toFixed(1)} vec/s`,
@@ -297,6 +303,8 @@ async function processLanguageFile(
 
         for (const row of rowBatch) {
             rowsSeen++;
+
+            progress.updateRawRow(row.query_id - offset);
 
             // Skip rows already durably indexed in a prior run.
             if (rowsSeen <= resumeOffset) {
