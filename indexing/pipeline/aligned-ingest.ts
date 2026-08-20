@@ -179,14 +179,14 @@ export async function runIngest(shardIndex: number, numShards = DEFAULT_NUM_SHAR
 
     const startedAt = Date.now();
     let lastReportAt = Date.now();
-    let lastReportVectors = index.ntotal - startFaissId;
+    let lastReportVectors = index.ntotal;
     let lastReportPassages = 0;
 
     async function persistCheckpoint() {
         await index.save(indexFile);
         metadata.checkpoint();
         checkpoint.rowsConsumed += rowsConsumedThisRun;
-        checkpoint.vectorsIndexed = index.ntotal - startFaissId;
+        checkpoint.vectorsIndexed = index.ntotal;
         await checkpoint.save();
         vectorsSinceCheckpoint = 0;
         rowsConsumedThisRun = 0;
@@ -270,7 +270,7 @@ export async function runIngest(shardIndex: number, numShards = DEFAULT_NUM_SHAR
             const currentTotal = checkpoint.rowsConsumed + rowsConsumedThisRun;
             const percent = finalLimit > 0 ? (currentTotal / finalLimit * 100).toFixed(2) : "0.00";
             
-            const totalIndexed = index.ntotal - startFaissId;
+            const totalIndexed = index.ntotal;
             const elapsedSec = (now - startedAt) / 1000;
             const sinceLastSec = Math.max((now - lastReportAt) / 1000, 0.001);
             const vectorsSinceLast = totalIndexed - lastReportVectors;
