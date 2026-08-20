@@ -17,21 +17,41 @@ async function loadValidationQueries(filePath: string): Promise<string[]> {
     const db = await DuckDBInstance.create(":memory:");
     const conn = await db.connect();
     try {
+        const describeResult = await conn.stream(`
+            DESCRIBE SELECT * FROM read_parquet('${filePath.replace(/'/g, "''")}')
+        `);
+        const describeChunk = await describeResult.fetchChunk();
+        if (!describeChunk) return [];
+        
+        const cols = describeResult.deduplicatedColumnNames();
+        const rows = describeChunk.getRowObjects(cols);
+        const nameKey = cols.find(c => c.toLowerCase().includes("name") || c.toLowerCase().includes("field")) || cols[0];
+        
+        let queryCol = "";
+        for (const r of rows) {
+            const colName = String(r[nameKey] || "");
+            if (colName.toLowerCase().includes("query") || 
+                colName.toLowerCase().includes("question") || 
+                colName.toLowerCase().includes("text")) {
+                queryCol = colName;
+                break;
+            }
+        }
+        if (!queryCol && rows.length > 0) {
+            queryCol = String(rows[0][nameKey] || "");
+        }
+
+        if (!queryCol) return [];
+
         const result = await conn.stream(`
-            SELECT *
+            SELECT "${queryCol}"
             FROM read_parquet('${filePath.replace(/'/g, "''")}')
         `);
-        const columnNames = result.deduplicatedColumnNames();
-        const queryCol = columnNames.find(c => 
-            c.toLowerCase().includes("query") || 
-            c.toLowerCase().includes("question") || 
-            c.toLowerCase().includes("text")
-        ) || columnNames[0];
         
         const queries: string[] = [];
         let chunk;
         while ((chunk = await result.fetchChunk())) {
-            const rawRows = chunk.getRowObjects(columnNames);
+            const rawRows = chunk.getRowObjects([queryCol]);
             for (const row of rawRows) {
                 if (row && row[queryCol]) {
                     queries.push(String(row[queryCol]));
@@ -147,8 +167,8 @@ async function runTests() {
                 if (valQueries.length > 0) {
                     break;
                 }
-            } catch {
-                // skip failed reads
+            } catch (e: any) {
+                console.error(`  ❌ Failed to parse Parquet file at "${p}": ${e.message}`);
             }
         }
     }
