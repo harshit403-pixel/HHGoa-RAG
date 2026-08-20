@@ -30,8 +30,8 @@ COPY --from=server /app/dist ./
 
 COPY --from=client /app/dist ./public
 
-# Copy index files optionally from the server build stage (using wildcard to prevent build crash if missing)
-COPY --from=server /app/indexes* ./indexes/
+# Copy index files from the indexing workspace folder into the final container
+COPY indexing/indexes/aligned_english* ./indexes/aligned_english/
 
 EXPOSE 3000
 
