@@ -191,18 +191,18 @@ async function runTests() {
             }
         }
         
-        // B. Run Local Retrieval Database benchmark across queries (max 1000) to prevent heap exhaustion
-        const localTestCount = Math.min(valQueries.length, 1000);
-        console.log(`  📊 Running local RAG database benchmark over ${localTestCount} validation queries...`);
+        // B. Run Local Retrieval Database benchmark across ALL queries in the validation dataset
+        const localTestCount = valQueries.length;
+        console.log(`  📊 Running local RAG database benchmark over ALL ${localTestCount} validation queries...`);
+        const queryVector = new Float32Array(vectorIndex.reconstructBatch([0n]));
+        
         for (let i = 0; i < localTestCount; i++) {
             // Yield back to event loop to allow GC to run
-            if (i > 0 && i % 100 === 0) {
+            if (i > 0 && i % 1000 === 0) {
                 await new Promise(resolve => setImmediate(resolve));
             }
             const localStart = performance.now();
-            const id = BigInt(i % vectorIndex.ntotal);
-            const sampleVector = vectorIndex.reconstructBatch([id]);
-            const searchResult = vectorIndex.search(new Float32Array(sampleVector), 5);
+            const searchResult = vectorIndex.search(queryVector, 5);
             searchResult.ids.forEach((matchId) => {
                 const row = selectStmt.get(Number(matchId)) as any;
                 if (row && row.translations) {
