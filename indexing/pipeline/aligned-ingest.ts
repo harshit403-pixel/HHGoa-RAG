@@ -136,7 +136,7 @@ export async function runIngest(shardIndex: number, numShards = DEFAULT_NUM_SHAR
 
     logger.info({ shardIndex, numShards, shardDir }, `${colorCode}[${shardName}] Starting aligned ingestion worker\x1b[0m`);
 
-    const limit = 3000;
+    const limit = 300;
     const offset = shardIndex * limit;
     const finalLimit = limit;
 

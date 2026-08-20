@@ -47,7 +47,7 @@ MISTRAL_API_KEY2=your_second_mistral_api_key_here
 ---
 
 ### Step 3: Run the Ingestion Workers (Shards 0-9)
-We split the embedding task into 10 parallel segments (shards) containing 3,000 rows each (total 30,000 rows).
+We split the embedding task into 10 parallel segments (shards) containing 300 rows each (total 3,000 Parquet rows, yielding ~30,000 passages).
 
 You can run them in separate terminals (recommended for safety so you can watch for crashes/errors) or launch them all at once in the background.
 
