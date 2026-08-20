@@ -42,7 +42,7 @@ export async function runInject(): Promise<void> {
 
     const updateStmt = db.prepare(`
         UPDATE chunks
-        SET translations = json_set(translations, '$["' || :lang || '"]', :text)
+        SET translations = json_set(translations, '$.\"' || :lang || '\"', :text)
         WHERE query_id = :query_id AND passage_index = :passage_index
     `);
 
