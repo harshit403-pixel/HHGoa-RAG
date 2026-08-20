@@ -35,7 +35,23 @@ function useAudioAnalyser() {
    */
   const handleSilenceRef = useRef(null);
 
+  /*
+   * MediaRecorder refs for raw audio capturing
+   */
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const onAudioReadyRef = useRef(null);
+
   const stop = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {
+        // ignore errors on early stop
+      }
+      mediaRecorderRef.current = null;
+    }
+
     if (animationFrameRef.current !== null) {
       cancelAnimationFrame(
         animationFrameRef.current,
@@ -96,6 +112,24 @@ function useAudioAnalyser() {
             autoGainControl: true,
           },
         });
+
+      // Set up MediaRecorder to capture audio chunks
+      const audioChunks = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunks.push(event.data);
+        }
+      };
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
+        if (onAudioReadyRef.current) {
+          onAudioReadyRef.current(audioBlob);
+        }
+      };
+      mediaRecorder.start();
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = audioChunks;
 
       const AudioContext =
         window.AudioContext ||
@@ -312,10 +346,18 @@ function useAudioAnalyser() {
     [],
   );
 
+  const onAudioReady = useCallback(
+    (callback) => {
+      onAudioReadyRef.current = callback;
+    },
+    [],
+  );
+
   useEffect(() => {
     return () => {
       stop();
       handleSilenceRef.current = null;
+      onAudioReadyRef.current = null;
     };
   }, [stop]);
 
@@ -327,6 +369,7 @@ function useAudioAnalyser() {
     start,
     stop,
     onSilence,
+    onAudioReady,
   };
 }
 

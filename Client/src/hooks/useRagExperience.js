@@ -4,100 +4,174 @@ const INITIAL_STATE = {
   messages: [],
   isProcessing: false,
   error: null,
+  statusUpdates: [],
 };
 
-const MOCK_RESPONSE = {
-  query: "What is multilingual information retrieval?",
-  answer:
-    "Multilingual information retrieval is the process of finding relevant information across multiple languages. It allows a user to submit a query in one language and retrieve useful information from documents written in the same or different languages.",
-  grounded: true,
-  sources: [
-    {
-      id: "source-1",
-      text: "Multilingual information retrieval deals with retrieving information across multiple languages and enables users to access relevant content regardless of the language in which that content is written.",
-      score: 0.94,
-      metadata: {
-        dataset: "MSMARCO-XI",
-        type: "retrieved context",
-      },
-    },
-    {
-      id: "source-2",
-      text: "Cross-language information retrieval systems can accept a query in one language and return documents or passages written in another language.",
-      score: 0.89,
-      metadata: {
-        dataset: "MSMARCO-XI",
-        type: "retrieved context",
-      },
-    },
-  ],
-};
+const API_BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  ? "http://localhost:5000"
+  : window.location.origin;
 
 function useRagExperience() {
   const [state, setState] = useState(INITIAL_STATE);
 
-  const addUserMessage = useCallback((query) => {
-    setState((current) => ({
-      ...current,
-      messages: [
-        ...current.messages,
-        {
-          id: crypto.randomUUID(),
-          role: "user",
-          content: query,
-        },
-      ],
-      error: null,
-    }));
+  const clearConversation = useCallback(() => {
+    setState(INITIAL_STATE);
   }, []);
 
-  const startProcessing = useCallback(() => {
+  const submitQuery = useCallback(async (payload) => {
     setState((current) => ({
       ...current,
       isProcessing: true,
       error: null,
+      statusUpdates: [],
     }));
-  }, []);
 
-  const addAssistantMessage = useCallback(() => {
+    const userMsgId = crypto.randomUUID();
+    const assistantMsgId = crypto.randomUUID();
+    const isAudio = payload instanceof Blob;
+
+    // Add placeholder messages
     setState((current) => ({
       ...current,
       messages: [
         ...current.messages,
         {
-          id: crypto.randomUUID(),
+          id: userMsgId,
+          role: "user",
+          content: isAudio ? "🎙️ Transcribing voice..." : payload,
+        },
+        {
+          id: assistantMsgId,
           role: "assistant",
-          content: MOCK_RESPONSE.answer,
-          grounded: MOCK_RESPONSE.grounded,
-          sources: MOCK_RESPONSE.sources,
+          content: "",
+          sources: [],
+          grounded: true,
         },
       ],
-      isProcessing: false,
-      error: null,
     }));
-  }, []);
 
-  const setError = useCallback((message) => {
-    setState((current) => ({
-      ...current,
-      isProcessing: false,
-      error: message,
-    }));
-  }, []);
+    try {
+      const headers = {};
+      let body;
 
-  const clearConversation = useCallback(() => {
-    setState(INITIAL_STATE);
+      if (isAudio) {
+        const formData = new FormData();
+        formData.append("audio", payload, "query.wav");
+        body = formData;
+      } else {
+        headers["Content-Type"] = "application/json";
+        body = JSON.stringify({ query: payload, language: "en-IN" });
+      }
+
+      const response = await fetch(`${API_BASE}/api/query`, {
+        method: "POST",
+        headers,
+        body,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP API error ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error("Server returned empty response stream");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          if (trimmed.startsWith("event: ")) {
+            currentEvent = trimmed.slice(7).trim();
+          } else if (trimmed.startsWith("data: ")) {
+            const dataStr = trimmed.slice(6).trim();
+            try {
+              const data = JSON.parse(dataStr);
+              
+              // Handle SSE Events
+              if (currentEvent === "status") {
+                setState((current) => ({
+                  ...current,
+                  statusUpdates: [
+                    ...current.statusUpdates,
+                    {
+                      step: data.step,
+                      message: data.message,
+                      timestamp: data.timestamp,
+                      latency: data.latency,
+                    },
+                  ],
+                }));
+              } else if (currentEvent === "metadata") {
+                setState((current) => ({
+                  ...current,
+                  messages: current.messages.map((m) => {
+                    if (m.id === userMsgId) {
+                      return { ...m, content: data.query };
+                    }
+                    if (m.id === assistantMsgId) {
+                      return { ...m, sources: data.citations };
+                    }
+                    return m;
+                  }),
+                }));
+              } else if (currentEvent === "chunk") {
+                setState((current) => ({
+                  ...current,
+                  messages: current.messages.map((m) => {
+                    if (m.id === assistantMsgId) {
+                      return { ...m, content: m.content + data.text };
+                    }
+                    return m;
+                  }),
+                }));
+              } else if (currentEvent === "error") {
+                setState((current) => ({
+                  ...current,
+                  error: data.message,
+                  isProcessing: false,
+                }));
+              } else if (currentEvent === "done") {
+                setState((current) => ({
+                  ...current,
+                  isProcessing: false,
+                }));
+              }
+            } catch (e) {
+              // skip malformed JSON lines
+            }
+          }
+        }
+      }
+    } catch (err) {
+      setState((current) => ({
+        ...current,
+        error: err.message || "Failed to retrieve RAG response",
+        isProcessing: false,
+      }));
+    }
   }, []);
 
   return {
     messages: state.messages,
     isProcessing: state.isProcessing,
     error: state.error,
+    statusUpdates: state.statusUpdates,
 
-    addUserMessage,
-    startProcessing,
-    addAssistantMessage,
-    setError,
+    submitQuery,
     clearConversation,
   };
 }

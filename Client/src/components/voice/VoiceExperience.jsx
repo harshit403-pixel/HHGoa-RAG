@@ -18,26 +18,19 @@ function VoiceExperience({
     start,
     stop,
     onSilence,
+    onAudioReady,
   } = useAudioAnalyser();
 
   const processingTimerRef = useRef(null);
 
   /*
-   * Handle voice query.
-   *
-   * For now this uses mock transcription.
-   * Later replace this with the actual STT
-   * result coming from your backend.
+   * Pass the recorded voice audio blob up when ready.
    */
-  const processVoiceQuery = useCallback(() => {
-    if (isProcessing) {
-      return;
-    }
-
-    onVoiceQuery(
-      "What is multilingual information retrieval?",
-    );
-  }, [isProcessing, onVoiceQuery]);
+  useEffect(() => {
+    onAudioReady((blob) => {
+      onVoiceQuery(blob);
+    });
+  }, [onAudioReady, onVoiceQuery]);
 
   /*
    * Automatically process when the analyser
@@ -50,21 +43,11 @@ function VoiceExperience({
       }
 
       stop();
-
-      /*
-       * Small delay so the UI can transition from
-       * Listening → Processing naturally.
-       */
-      processingTimerRef.current =
-        window.setTimeout(() => {
-          processVoiceQuery();
-        }, 250);
     });
   }, [
     isActive,
     isProcessing,
     onSilence,
-    processVoiceQuery,
     stop,
   ]);
 

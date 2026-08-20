@@ -8,31 +8,18 @@ function App() {
   const {
     messages,
     isProcessing,
-    addUserMessage,
-    startProcessing,
-    addAssistantMessage,
+    statusUpdates,
+    submitQuery,
   } = useRagExperience();
 
   const handleVoiceQuery = useCallback(
     (query) => {
-      if (!query?.trim()) {
+      if (!query) {
         return;
       }
-
-      addUserMessage(query);
-      startProcessing();
-
-      // Temporary mock RAG response.
-      // Backend will replace this later.
-      window.setTimeout(() => {
-        addAssistantMessage();
-      }, 900);
+      submitQuery(query);
     },
-    [
-      addUserMessage,
-      startProcessing,
-      addAssistantMessage,
-    ],
+    [submitQuery],
   );
 
   return (
@@ -40,6 +27,7 @@ function App() {
       <Conversation
         messages={messages}
         isProcessing={isProcessing}
+        statusUpdates={statusUpdates}
       />
 
       <VoiceExperience

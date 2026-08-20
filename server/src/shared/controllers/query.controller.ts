@@ -46,16 +46,24 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
     try {
         // 2. Handle audio input (STT) or text input
         if (req.file) {
+            sendEvent("status", { step: "stt", message: "Transcribing audio input using Sarvam AI...", timestamp: Date.now() });
             const sttStart = performance.now();
             const transcription = await transcribeAudio(req.file.buffer, req.file.originalname);
             sttMs = Math.round(performance.now() - sttStart);
 
             queryText = transcription.transcript;
             userLanguage = transcription.language_code || "en-IN";
+            sendEvent("status", { 
+                step: "stt_done", 
+                message: `Transcription complete in ${sttMs}ms: "${queryText}"`, 
+                timestamp: Date.now(), 
+                latency: sttMs 
+            });
         } else {
             const body = req.body || {};
             queryText = String(body.query || "").trim();
             userLanguage = String(body.language || "en-IN").trim();
+            sendEvent("status", { step: "text_input", message: `Received text query: "${queryText}"`, timestamp: Date.now() });
         }
 
         if (!queryText) {
@@ -84,40 +92,66 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
 
         // 4. Translate query to English if the input language is not English
         if (translationNeeded) {
+            sendEvent("status", { step: "translate", message: `Translating query from [${userLanguage}] to English...`, timestamp: Date.now() });
             const transStart = performance.now();
             // Translate the query to English (en-IN)
             const translation = await translateText(queryText, userLanguage, "en-IN");
             translationMs += Math.round(performance.now() - transStart);
             translatedQuery = translation.translated_text;
+            sendEvent("status", { 
+                step: "translate_done", 
+                message: `Translation complete in ${translationMs}ms: "${translatedQuery}"`, 
+                timestamp: Date.now(), 
+                latency: translationMs 
+            });
         }
 
         // 4b. Input Safety & Off-Topic Guardrail Check
+        sendEvent("status", { step: "guardrails", message: "Running safety and topic guardrails...", timestamp: Date.now() });
         const inputGuard = await ModelHarness.checkInputGuardrail(queryText);
         if (!inputGuard.passed) {
             logger.warn({ queryText, reason: inputGuard.reason }, "Input rejected by guardrails");
             sendEvent("error", { message: `Blocked: ${inputGuard.reason}` });
+            sendEvent("status", { step: "guardrails_failed", message: `Guardrails rejection: ${inputGuard.reason}`, timestamp: Date.now() });
             res.end();
             return;
         }
+        sendEvent("status", { step: "guardrails_done", message: "Safety and topic guardrails passed successfully.", timestamp: Date.now() });
 
         // 5. Embed the query using Mistral with Retry Orchestrator
+        sendEvent("status", { step: "embed", message: "Generating text vector embeddings using Mistral API...", timestamp: Date.now() });
         const queryToEmbed = translationNeeded ? translatedQuery : queryText;
         const embedStart = performance.now();
         const queryVector = await ModelHarness.executeWithRetry(() => getEmbedding(queryToEmbed));
         const embedMs = Math.round(performance.now() - embedStart);
+        sendEvent("status", { 
+            step: "embed_done", 
+            message: `Text query embedded in ${embedMs}ms.`, 
+            timestamp: Date.now(), 
+            latency: embedMs 
+        });
 
         // 6. Vector similarity search in the unified English index
+        sendEvent("status", { step: "search", message: "Searching local FAISS HNSW vector database...", timestamp: Date.now() });
         const searcher = getSearcher(activeFolder);
         const searchStart = performance.now();
         const rawResults = searcher.search(queryVector, 5);
         searchMs = Math.round(performance.now() - searchStart);
+        sendEvent("status", { 
+            step: "search_done", 
+            message: `Vector search complete in ${searchMs}ms. Found ${rawResults.length} matches.`, 
+            timestamp: Date.now(), 
+            latency: searchMs 
+        });
 
         logger.info({ folder: activeFolder, count: rawResults.length, searchMs, embedMs }, "FAISS search complete");
 
         // 6b. Groundedness / Hallucination Guardrail Check
+        sendEvent("status", { step: "grounding", message: "Running groundedness analysis & hallucination checks...", timestamp: Date.now() });
         const groundingGuard = ModelHarness.checkRetrievalGrounding(rawResults);
         if (!groundingGuard.passed) {
             logger.info({ queryText, reason: groundingGuard.reason }, "Refusing to answer due to grounding guardrails");
+            sendEvent("status", { step: "grounding_failed", message: `Refusal: ${groundingGuard.reason}`, timestamp: Date.now() });
             sendEvent("metadata", {
                 query: queryText,
                 userLanguage,
@@ -135,8 +169,10 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
             res.end();
             return;
         }
+        sendEvent("status", { step: "grounding_done", message: "Groundedness verified. Retrieved documents match confidence threshold.", timestamp: Date.now() });
 
         // 7. Extract the target language translation locally from the database (zero external API calls!)
+        sendEvent("status", { step: "retrieve", message: "Extracting multilingual translations from SQLite database...", timestamp: Date.now() });
         const citations = rawResults.map(r => {
             let text = r.text; // Default to English
             if (baseLang !== "en" && r.translations) {
@@ -154,6 +190,7 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
                 text
             };
         });
+        sendEvent("status", { step: "retrieve_done", message: "Multi-lingual document text resolved locally (0 API calls).", timestamp: Date.now() });
 
         // Send metadata & citations to the frontend immediately
         sendEvent("metadata", {
@@ -176,6 +213,7 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
         });
 
         // 8. Generate answer using Mistral Chat API
+        sendEvent("status", { step: "generate", message: "Synthesizing answer using Mistral Chat Completion...", timestamp: Date.now() });
         const contextString = citations.map((c, i) => `[Source ${i + 1}]: ${c.text}`).join("\n\n");
         const systemPrompt = `You are a professional assistant. Answer the user's question in detail based ONLY on the provided context. If the context does not contain the answer, say "I cannot find the answer in the provided documents." DO NOT make up information.
 Your response MUST be written in the user's language: ${userLanguage}.
@@ -187,6 +225,7 @@ ${contextString}`;
         for await (const chunk of streamChatCompletion(systemPrompt, queryText)) {
             sendEvent("chunk", { text: chunk });
         }
+        sendEvent("status", { step: "generate_done", message: "Grounded response stream completed.", timestamp: Date.now() });
 
         sendEvent("done", {});
         res.end();

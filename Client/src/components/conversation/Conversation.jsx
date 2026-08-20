@@ -5,6 +5,7 @@ import SourceCard from "../answer/SourceCard";
 function Conversation({
   messages = [],
   isProcessing = false,
+  statusUpdates = [],
 }) {
   const bottomRef = useRef(null);
 
@@ -17,7 +18,7 @@ function Conversation({
       behavior: "smooth",
       block: "end",
     });
-  }, [messages.length, isProcessing]);
+  }, [messages.length, isProcessing, statusUpdates.length]);
 
   if (messages.length === 0 && !isProcessing) {
     return null;
@@ -103,7 +104,7 @@ function Conversation({
                 {/* Answer */}
                 <div className="max-w-3xl">
                   <p className="text-[15px] leading-8 text-white/75 sm:text-base">
-                    {message.content}
+                    {message.content || (isProcessing ? "Thinking..." : "")}
                   </p>
                 </div>
 
@@ -125,7 +126,7 @@ function Conversation({
                         (source, index) => (
                           <SourceCard
                             key={
-                              source.id ?? index
+                              source.chunk_id ?? source.id ?? index
                             }
                             source={source}
                             index={index}
@@ -139,6 +140,17 @@ function Conversation({
             );
           })}
         </AnimatePresence>
+
+        {/* Pipeline SSE Status Logs Console */}
+        {statusUpdates.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+          >
+            <PipelineConsole statusUpdates={statusUpdates} isProcessing={isProcessing} />
+          </motion.div>
+        )}
 
         {/* Processing */}
         <AnimatePresence>
@@ -155,6 +167,69 @@ function Conversation({
         />
       </div>
     </main>
+  );
+}
+
+function PipelineConsole({ statusUpdates = [], isProcessing = false }) {
+  const terminalEndRef = useRef(null);
+
+  useEffect(() => {
+    if (terminalEndRef.current) {
+      terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [statusUpdates.length]);
+
+  return (
+    <div className="rounded-2xl border border-white/[0.08] bg-[#0c0c14] p-5 font-mono text-[11px] text-violet-300/80 shadow-2xl">
+      <div className="mb-3 flex items-center justify-between border-b border-white/[0.05] pb-2 text-[10px] uppercase tracking-wider text-white/35">
+        <span>RAG Pipeline Execution Logs (SSE Stream)</span>
+        {isProcessing ? (
+          <span className="flex items-center gap-1.5 text-emerald-400">
+            <span className="h-1.5 w-1.5 animate-ping rounded-full bg-emerald-400" />
+            Streaming Live
+          </span>
+        ) : (
+          <span className="text-white/20">Finished</span>
+        )}
+      </div>
+      <div className="max-h-48 overflow-y-auto space-y-2 pr-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+        {statusUpdates.map((update, idx) => {
+          const date = new Date(update.timestamp);
+          const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' + String(date.getMilliseconds()).padStart(3, '0');
+          const isDone = update.step.endsWith("_done") || update.step === "guardrails_done" || update.step === "generate_done";
+          const isFailed = update.step.endsWith("_failed");
+          
+          let prefix = "●";
+          let color = "text-violet-300/60";
+          if (isDone) {
+            prefix = "✔";
+            color = "text-emerald-400/90";
+          } else if (isFailed) {
+            prefix = "✖";
+            color = "text-red-400";
+          } else if (isProcessing && idx === statusUpdates.length - 1) {
+            prefix = "⚡";
+            color = "text-cyan-400 animate-pulse";
+          }
+          
+          return (
+            <div key={idx} className={`flex items-start gap-2 leading-relaxed ${color}`}>
+              <span className="shrink-0 font-medium text-white/25">[{timeStr}]</span>
+              <span className="shrink-0 font-bold">{prefix}</span>
+              <span>
+                {update.message}
+                {update.latency !== undefined && (
+                  <span className="ml-2 rounded bg-white/[0.06] px-1 py-0.5 text-[9px] font-semibold text-white/40">
+                    {update.latency}ms
+                  </span>
+                )}
+              </span>
+            </div>
+          );
+        })}
+        <div ref={terminalEndRef} />
+      </div>
+    </div>
   );
 }
 
