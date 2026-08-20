@@ -109,6 +109,8 @@ env/
 
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 aligned_shard*
 
 # ================================
