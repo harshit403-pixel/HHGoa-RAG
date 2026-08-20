@@ -1,9 +1,14 @@
 import { config } from 'dotenv';
 import z from 'zod';
 import path from 'node:path';
+import fs from 'node:fs';
 import envConstants from '../constants/env.constants.js';
 
 config();
+
+const defaultIndexRoot = fs.existsSync(path.resolve(process.cwd(), './indexes/aligned_english'))
+    ? path.resolve(process.cwd(), './indexes')
+    : path.resolve(process.cwd(), '../indexing/indexes');
 
 const envSchema = z.object({
     PORT: z.coerce.number().default(envConstants.PORT),
@@ -11,7 +16,7 @@ const envSchema = z.object({
     CORS_ORIGIN: z.string().default(envConstants.CORS_ORIGIN),
     MISTRAL_API_KEY: z.string().optional(),
     SARVAM_API_KEY: z.string().optional(),
-    INDEX_ROOT: z.string().default(path.resolve(process.cwd(), '../indexing/indexes'))
+    INDEX_ROOT: z.string().default(defaultIndexRoot)
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
