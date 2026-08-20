@@ -17,29 +17,20 @@ async function loadValidationQueries(filePath: string): Promise<string[]> {
     const db = await DuckDBInstance.create(":memory:");
     const conn = await db.connect();
     try {
-        const describeResult = await conn.stream(`
-            DESCRIBE SELECT * FROM read_parquet('${filePath.replace(/'/g, "''")}')
+        const sampleResult = await conn.stream(`
+            SELECT *
+            FROM read_parquet('${filePath.replace(/'/g, "''")}')
+            LIMIT 1
         `);
-        const describeChunk = await describeResult.fetchChunk();
-        if (!describeChunk) return [];
+        const sampleChunk = await sampleResult.fetchChunk();
+        if (!sampleChunk || sampleChunk.rowCount === 0) return [];
+        const cols = sampleResult.deduplicatedColumnNames();
         
-        const cols = describeResult.deduplicatedColumnNames();
-        const rows = describeChunk.getRowObjects(cols);
-        const nameKey = cols.find(c => c.toLowerCase().includes("name") || c.toLowerCase().includes("field")) || cols[0];
-        
-        let queryCol = "";
-        for (const r of rows) {
-            const colName = String(r[nameKey] || "");
-            if (colName.toLowerCase().includes("query") || 
-                colName.toLowerCase().includes("question") || 
-                colName.toLowerCase().includes("text")) {
-                queryCol = colName;
-                break;
-            }
-        }
-        if (!queryCol && rows.length > 0) {
-            queryCol = String(rows[0][nameKey] || "");
-        }
+        const queryCol = cols.find(c => 
+            c.toLowerCase().includes("query") || 
+            c.toLowerCase().includes("question") || 
+            c.toLowerCase().includes("text")
+        ) || cols[0];
 
         if (!queryCol) return [];
 
@@ -51,6 +42,9 @@ async function loadValidationQueries(filePath: string): Promise<string[]> {
         const queries: string[] = [];
         let chunk;
         while ((chunk = await result.fetchChunk())) {
+            if (!chunk || chunk.rowCount === 0 || chunk.columnCount === 0) {
+                break;
+            }
             const rawRows = chunk.getRowObjects([queryCol]);
             for (const row of rawRows) {
                 if (row && row[queryCol]) {
@@ -197,9 +191,14 @@ async function runTests() {
             }
         }
         
-        // B. Run Local Retrieval Database benchmark across ALL queries (using reconstructed vectors)
-        console.log(`  📊 Running local RAG database benchmark over ALL ${valQueries.length} validation queries...`);
-        for (let i = 0; i < valQueries.length; i++) {
+        // B. Run Local Retrieval Database benchmark across queries (max 1000) to prevent heap exhaustion
+        const localTestCount = Math.min(valQueries.length, 1000);
+        console.log(`  📊 Running local RAG database benchmark over ${localTestCount} validation queries...`);
+        for (let i = 0; i < localTestCount; i++) {
+            // Yield back to event loop to allow GC to run
+            if (i > 0 && i % 100 === 0) {
+                await new Promise(resolve => setImmediate(resolve));
+            }
             const localStart = performance.now();
             const id = BigInt(i % vectorIndex.ntotal);
             const sampleVector = vectorIndex.reconstructBatch([id]);
