@@ -109,6 +109,7 @@ env/
 
 *.sqlite
 *.sqlite3
+aligned_shard*
 
 # ================================
 # Generated files
