@@ -18,6 +18,8 @@
 // (see below) checks this for you before a real run.
 // ─────────────────────────────────────────────
 
+import "dotenv/config";
+
 function envString(name: string, fallback: string): string {
     return process.env[name]?.trim() || fallback;
 }
@@ -34,20 +36,14 @@ function envInt(name: string, fallback: number): number {
 // ─────────────────────────────────────────────
 
 // Source data — read-only, streamed, never copied.
-export const TRAIN_DIR = envString(
-    "TRAIN_DIR",
-    "/data/hfData/train"
-);
+export const TRAIN_DIR = envString("TRAIN_DIR", "/data/hfData/train");
 
 // Destination for indexes. Kept in a distinct subtree
 // (hhgoa/indexes) from the source data (hfData/train) so
 // a recursive cleanup of one never touches the other —
 // they don't need to be on separate physical disks, just
 // separate paths that are never crossed by writes.
-export const INDEX_ROOT = envString(
-    "INDEX_ROOT",
-    "/data/hhgoa/indexes"
-);
+export const INDEX_ROOT = envString("INDEX_ROOT", "/data/hhgoa/indexes");
 
 // ─────────────────────────────────────────────
 // Embedding
@@ -63,10 +59,9 @@ export const INDEX_ROOT = envString(
 // throughput from the ingestion process entirely and
 // lets you scale it independently / run multiple
 // ingestion workers against one GPU server.
-export const EMBEDDING_PROVIDER = envString(
-    "EMBEDDING_PROVIDER",
-    "local"
-) as "local" | "http";
+export const EMBEDDING_PROVIDER = envString("EMBEDDING_PROVIDER", "local") as
+    | "local"
+    | "http";
 
 // Model identifier. For "local" this is a HuggingFace
 // repo id resolvable by @xenova/transformers (must have
@@ -77,31 +72,25 @@ export const EMBEDDING_PROVIDER = envString(
 // your server expects one.
 export const EMBEDDING_MODEL = envString(
     "EMBEDDING_MODEL",
-    "Xenova/multilingual-e5-large"
+    "Xenova/multilingual-e5-large",
 );
 
 // MUST match the model's actual output width. See
 // verify-embedder.ts — run it once per model change,
 // don't hand-edit this blind.
-export const EMBEDDING_DIMENSION = envInt(
-    "EMBEDDING_DIMENSION",
-    1024
-);
+export const EMBEDDING_DIMENSION = envInt("EMBEDDING_DIMENSION", 1024);
 
 // How many chunk texts go into one embed() call. Larger
 // batches → better throughput (especially on GPU) at
 // the cost of more peak memory per batch and higher
 // latency-to-first-result. This is NOT the same as
 // MAX_PENDING_CHUNKS below.
-export const EMBEDDING_BATCH_SIZE = envInt(
-    "EMBEDDING_BATCH_SIZE",
-    32
-);
+export const EMBEDDING_BATCH_SIZE = envInt("EMBEDDING_BATCH_SIZE", 32);
 
 // Only used when EMBEDDING_PROVIDER === "http".
 export const EMBEDDING_HTTP_URL = envString(
     "EMBEDDING_HTTP_URL",
-    "http://localhost:8080/embed"
+    "http://localhost:8080/embed",
 );
 
 // ─────────────────────────────────────────────
@@ -113,10 +102,7 @@ export const EMBEDDING_HTTP_URL = envString(
 // "flat" = exact brute-force index. O(n) per query. Only
 // meant for recall evaluation / correctness testing on
 // a subset — do not run this over the full corpus.
-export const INDEX_TYPE = envString(
-    "INDEX_TYPE",
-    "hnsw"
-) as "hnsw" | "flat";
+export const INDEX_TYPE = envString("INDEX_TYPE", "hnsw") as "hnsw" | "flat";
 
 // HNSW graph degree. Higher M → better recall & more
 // memory (~M * 2 * 4 bytes of graph overhead per vector,
@@ -130,10 +116,7 @@ export const HNSW_M = envInt("HNSW_M", 32);
 // static one-time-build corpora like this one, since
 // indexing time is a one-off cost, but query quality
 // depends on it forever.
-export const HNSW_EF_CONSTRUCTION = envInt(
-    "HNSW_EF_CONSTRUCTION",
-    200
-);
+export const HNSW_EF_CONSTRUCTION = envInt("HNSW_EF_CONSTRUCTION", 200);
 
 // Search-list size used at query time. Higher → better
 // recall, higher latency, roughly linear in efSearch.
@@ -158,10 +141,7 @@ export const FILE_CONCURRENCY = envInt("FILE_CONCURRENCY", 1);
 // cycle even if EMBEDDING_BATCH_SIZE hasn't been reached.
 // This is the real memory bound, independent of how fast
 // chunking vs. embedding runs.
-export const MAX_PENDING_CHUNKS = envInt(
-    "MAX_PENDING_CHUNKS",
-    2_000
-);
+export const MAX_PENDING_CHUNKS = envInt("MAX_PENDING_CHUNKS", 2_000);
 
 // Hard cap on embedding batches allowed to be in flight
 // (embedded but not yet added to the index) per file. With
@@ -172,7 +152,7 @@ export const MAX_PENDING_CHUNKS = envInt(
 // catch up.
 export const MAX_PENDING_EMBEDDING_BATCHES = envInt(
     "MAX_PENDING_EMBEDDING_BATCHES",
-    1
+    1,
 );
 
 // ─────────────────────────────────────────────
@@ -192,7 +172,7 @@ export const MAX_PENDING_EMBEDDING_BATCHES = envInt(
 // bottleneck.
 export const CHECKPOINT_EVERY_N_VECTORS = envInt(
     "CHECKPOINT_EVERY_N_VECTORS",
-    100_000
+    100_000,
 );
 
 // ─────────────────────────────────────────────
@@ -201,5 +181,5 @@ export const CHECKPOINT_EVERY_N_VECTORS = envInt(
 
 export const PROGRESS_EVERY_N_PASSAGES = envInt(
     "PROGRESS_EVERY_N_PASSAGES",
-    100
+    100,
 );

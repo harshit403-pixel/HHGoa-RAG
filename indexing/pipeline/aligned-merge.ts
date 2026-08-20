@@ -3,7 +3,7 @@ import fsSync from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { VectorIndex } from "./faiss-index.ts";
-import { INDEX_ROOT } from "./config.ts";
+import { INDEX_ROOT, TRAIN_DIR } from "./config.ts";
 import logger from "./logger.ts";
 
 const DEFAULT_NUM_SHARDS = 10;
@@ -29,7 +29,10 @@ export async function runMerge(numShards = DEFAULT_NUM_SHARDS): Promise<void> {
     const destIndexFile = path.join(destDir, "index.faiss");
     const destDbFile = path.join(destDir, "metadata.db");
 
-    logger.info({ destDir }, "Starting merge of 10 English shards into unified index");
+    logger.info(
+        { destDir },
+        "Starting merge of 10 English shards into unified index",
+    );
 
     // Clean destination directory
     if (fsSync.existsSync(destDir)) {
@@ -43,7 +46,10 @@ export async function runMerge(numShards = DEFAULT_NUM_SHARDS): Promise<void> {
     destDb.pragma("synchronous = OFF"); // Speed up batch inserts during merge
     destDb.exec(SCHEMA);
 
-    const mergedIndex = VectorIndex.create({ dimension: 1024, indexType: "hnsw" });
+    const mergedIndex = VectorIndex.create({
+        dimension: 1024,
+        indexType: "hnsw",
+    });
 
     for (let shardIndex = 0; shardIndex < numShards; shardIndex++) {
         const shardName = `aligned_shard${shardIndex}`;
@@ -54,8 +60,14 @@ export async function runMerge(numShards = DEFAULT_NUM_SHARDS): Promise<void> {
 
         logger.info({ shardName }, `Merging shard ${shardIndex}...`);
 
-        if (!fsSync.existsSync(shardIndexFile) || !fsSync.existsSync(shardDbFile)) {
-            logger.warn({ shardIndexFile, shardDbFile }, `Shard files missing - skipping shard ${shardIndex}`);
+        if (
+            !fsSync.existsSync(shardIndexFile) ||
+            !fsSync.existsSync(shardDbFile)
+        ) {
+            logger.warn(
+                { shardIndexFile, shardDbFile },
+                `Shard files missing - skipping shard ${shardIndex}`,
+            );
             continue;
         }
 
@@ -64,32 +76,48 @@ export async function runMerge(numShards = DEFAULT_NUM_SHARDS): Promise<void> {
         const ntotal = shardIndexObj.ntotal;
         const startFaissId = shardIndex * 50_000_000;
 
-        logger.info({ shardName, ntotal }, `Reconstructing vectors for ${shardName}`);
+        logger.info(
+            { shardName, ntotal },
+            `Reconstructing vectors for ${shardName}`,
+        );
 
         let processed = 0;
         while (processed < ntotal) {
             const currentBatch = Math.min(BATCH_SIZE, ntotal - processed);
             const batchStartId = startFaissId + processed;
 
-            const ids = Array.from({ length: currentBatch }, (_, idx) => BigInt(batchStartId + idx));
+            const ids = Array.from({ length: currentBatch }, (_, idx) =>
+                BigInt(batchStartId + idx),
+            );
             const flatVectors = shardIndexObj.reconstructBatch(ids);
 
             // Insert into the merged index
             mergedIndex.addBatch(ids, new Float32Array(flatVectors));
             processed += currentBatch;
-            
+
             logger.info(`  Reconstructed vectors [${processed}/${ntotal}]...`);
         }
 
         // 2. Merge SQLite Database (fast ATTACH copy)
         logger.info({ shardName }, `Merging SQLite database for ${shardName}`);
-        
+
         try {
-            destDb.prepare(`ATTACH DATABASE '${shardDbFile.replace(/'/g, "''")}' AS shard_db`).run();
-            destDb.prepare("INSERT INTO main.chunks SELECT * FROM shard_db.chunks").run();
+            destDb
+                .prepare(
+                    `ATTACH DATABASE '${shardDbFile.replace(/'/g, "''")}' AS shard_db`,
+                )
+                .run();
+            destDb
+                .prepare(
+                    "INSERT INTO main.chunks SELECT * FROM shard_db.chunks",
+                )
+                .run();
             destDb.prepare("DETACH DATABASE shard_db").run();
         } catch (e: any) {
-            logger.error({ shardName, error: e.message }, "Error during SQLite merge, skipping database insert");
+            logger.error(
+                { shardName, error: e.message },
+                "Error during SQLite merge, skipping database insert",
+            );
             throw e;
         }
     }
@@ -105,18 +133,21 @@ export async function runMerge(numShards = DEFAULT_NUM_SHARDS): Promise<void> {
         JSON.stringify(
             {
                 language: "aligned_english",
-                sourceFile: "/data/hfData/train/asmtrain.parquet",
+                sourceFile: `${TRAIN_DIR}/asmtrain.parquet`,
                 completed: true,
                 updatedAt: new Date().toISOString(),
             },
             null,
-            2
-        )
+            2,
+        ),
     );
 
     destDb.pragma("synchronous = NORMAL");
     destDb.pragma("wal_checkpoint(TRUNCATE)");
     destDb.close();
 
-    logger.info({ destDir }, "Successfully merged 10 English shards into unified aligned_english index!");
+    logger.info(
+        { destDir },
+        "Successfully merged 10 English shards into unified aligned_english index!",
+    );
 }
