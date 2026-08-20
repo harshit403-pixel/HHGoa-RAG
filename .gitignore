@@ -110,6 +110,7 @@ env/
 *.sqlite
 *.sqlite3
 *.db
+!indexes/**/*.db
 
 # ================================
 # Generated files
