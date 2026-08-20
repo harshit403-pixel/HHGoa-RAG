@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { transcribeAudio, translateText } from "../utils/sarvam.util.js";
 import { getEmbedding, streamChatCompletion } from "../utils/mistral.util.js";
 import { LanguageSearcher, scanAvailableIndexes, resolveIndexFolder, SearchResult } from "../utils/search.util.js";
+import { ModelHarness } from "../utils/harness.util.js";
 import logger from "../config/logger.config.js";
 import path from "node:path";
 import env from "../config/env.config.js";
@@ -90,10 +91,19 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
             translatedQuery = translation.translated_text;
         }
 
-        // 5. Embed the query using Mistral
+        // 4b. Input Safety & Off-Topic Guardrail Check
+        const inputGuard = await ModelHarness.checkInputGuardrail(queryText);
+        if (!inputGuard.passed) {
+            logger.warn({ queryText, reason: inputGuard.reason }, "Input rejected by guardrails");
+            sendEvent("error", { message: `Blocked: ${inputGuard.reason}` });
+            res.end();
+            return;
+        }
+
+        // 5. Embed the query using Mistral with Retry Orchestrator
         const queryToEmbed = translationNeeded ? translatedQuery : queryText;
         const embedStart = performance.now();
-        const queryVector = await getEmbedding(queryToEmbed);
+        const queryVector = await ModelHarness.executeWithRetry(() => getEmbedding(queryToEmbed));
         const embedMs = Math.round(performance.now() - embedStart);
 
         // 6. Vector similarity search in the unified English index
@@ -103,6 +113,28 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
         searchMs = Math.round(performance.now() - searchStart);
 
         logger.info({ folder: activeFolder, count: rawResults.length, searchMs, embedMs }, "FAISS search complete");
+
+        // 6b. Groundedness / Hallucination Guardrail Check
+        const groundingGuard = ModelHarness.checkRetrievalGrounding(rawResults);
+        if (!groundingGuard.passed) {
+            logger.info({ queryText, reason: groundingGuard.reason }, "Refusing to answer due to grounding guardrails");
+            sendEvent("metadata", {
+                query: queryText,
+                userLanguage,
+                searchedIndex: activeFolder,
+                translationNeeded,
+                translatedQuery,
+                sttMs,
+                translationMs,
+                searchMs,
+                embedMs,
+                citations: []
+            });
+            sendEvent("chunk", { text: "I cannot find the answer in the provided documents." });
+            sendEvent("done", {});
+            res.end();
+            return;
+        }
 
         // 7. Extract the target language translation locally from the database (zero external API calls!)
         const citations = rawResults.map(r => {
