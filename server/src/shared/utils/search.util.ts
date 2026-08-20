@@ -17,6 +17,7 @@ export interface SearchResult {
     passage_index: number;
     chunk_index: number;
     chunk_type: "whole" | "semantic";
+    translations?: string;
 }
 
 /**
@@ -105,6 +106,7 @@ export class LanguageSearcher {
                 passage_index: row.passage_index,
                 chunk_index: row.chunk_index,
                 chunk_type: row.chunk_type,
+                translations: row.translations,
             });
         }
 

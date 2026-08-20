@@ -1,5 +1,6 @@
 import { config } from 'dotenv';
 import z from 'zod';
+import path from 'node:path';
 import envConstants from '../constants/env.constants.js';
 
 config();
@@ -10,7 +11,7 @@ const envSchema = z.object({
     CORS_ORIGIN: z.string().default(envConstants.CORS_ORIGIN),
     MISTRAL_API_KEY: z.string().optional(),
     SARVAM_API_KEY: z.string().optional(),
-    INDEX_ROOT: z.string().default('/data/hhgoa/indexes')
+    INDEX_ROOT: z.string().default(path.resolve(process.cwd(), '../indexing/indexes'))
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

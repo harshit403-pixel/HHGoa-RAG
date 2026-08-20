@@ -69,32 +69,25 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
         const availableIndexes = scanAvailableIndexes();
         const baseLang = userLanguage.split("-")[0]?.toLowerCase() || "en";
         
-        let indexFolderToSearch = resolveIndexFolder(baseLang, availableIndexes);
-        let translationNeeded = false;
-        let translatedQuery = "";
-
-        // 4. Fallback search routing
-        if (!indexFolderToSearch) {
-            logger.info({ baseLang }, "Index for language not available. Falling back to English translation");
-            
-            translationNeeded = true;
-            const transStart = performance.now();
-            
-            // Translate the query to English (en-IN)
-            const translation = await translateText(queryText, userLanguage, "en-IN");
-            translationMs += Math.round(performance.now() - transStart);
-            
-            translatedQuery = translation.translated_text;
-            indexFolderToSearch = "engtrain"; // Fallback to English index
-        }
-
-        const activeFolder = indexFolderToSearch as string;
+        const activeFolder = "aligned_english";
         if (!availableIndexes.has(activeFolder)) {
             sendEvent("error", { 
-                message: `The target index folder "${activeFolder}" is not completed or available on disk` 
+                message: `The target index folder "${activeFolder}" is not completed or available on disk at ${INDEX_ROOT}` 
             });
             res.end();
             return;
+        }
+
+        let translationNeeded = baseLang !== "en";
+        let translatedQuery = "";
+
+        // 4. Translate query to English if the input language is not English
+        if (translationNeeded) {
+            const transStart = performance.now();
+            // Translate the query to English (en-IN)
+            const translation = await translateText(queryText, userLanguage, "en-IN");
+            translationMs += Math.round(performance.now() - transStart);
+            translatedQuery = translation.translated_text;
         }
 
         // 5. Embed the query using Mistral
@@ -103,7 +96,7 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
         const queryVector = await getEmbedding(queryToEmbed);
         const embedMs = Math.round(performance.now() - embedStart);
 
-        // 6. Vector similarity search in the resolved index
+        // 6. Vector similarity search in the unified English index
         const searcher = getSearcher(activeFolder);
         const searchStart = performance.now();
         const rawResults = searcher.search(queryVector, 5);
@@ -111,22 +104,24 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
 
         logger.info({ folder: activeFolder, count: rawResults.length, searchMs, embedMs }, "FAISS search complete");
 
-        // 7. Context Translation (if fallback was used, translate retrieved English passages to user's language)
-        let citations = rawResults;
-        if (translationNeeded && rawResults.length > 0) {
-            const transStart = performance.now();
-            
-            // Bulk translate retrieved chunks to keep latency minimal
-            const joinedText = rawResults.map(r => r.text).join("\n---\n");
-            const translation = await translateText(joinedText, "en-IN", userLanguage);
-            translationMs += Math.round(performance.now() - transStart);
-
-            const translatedTexts = translation.translated_text.split("\n---\n");
-            citations = rawResults.map((r, i) => ({
+        // 7. Extract the target language translation locally from the database (zero external API calls!)
+        const citations = rawResults.map(r => {
+            let text = r.text; // Default to English
+            if (baseLang !== "en" && r.translations) {
+                try {
+                    const transObj = JSON.parse(r.translations);
+                    if (transObj[baseLang]) {
+                        text = transObj[baseLang];
+                    }
+                } catch (e: any) {
+                    logger.warn({ error: e.message }, "Failed to parse translations JSON from database metadata");
+                }
+            }
+            return {
                 ...r,
-                text: translatedTexts[i]?.trim() || r.text
-            }));
-        }
+                text
+            };
+        });
 
         // Send metadata & citations to the frontend immediately
         sendEvent("metadata", {
