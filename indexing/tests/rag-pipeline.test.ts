@@ -20,10 +20,7 @@ async function loadValidationQueries(filePath: string): Promise<string[]> {
         const result = await conn.stream(`
             SELECT *
             FROM read_parquet('${filePath.replace(/'/g, "''")}')
-            LIMIT 100
         `);
-        const chunk = await result.fetchChunk();
-        if (!chunk) return [];
         const columnNames = result.deduplicatedColumnNames();
         const queryCol = columnNames.find(c => 
             c.toLowerCase().includes("query") || 
@@ -31,11 +28,14 @@ async function loadValidationQueries(filePath: string): Promise<string[]> {
             c.toLowerCase().includes("text")
         ) || columnNames[0];
         
-        const rawRows = chunk.getRowObjects(columnNames);
         const queries: string[] = [];
-        for (const row of rawRows) {
-            if (row && row[queryCol]) {
-                queries.push(String(row[queryCol]));
+        let chunk;
+        while ((chunk = await result.fetchChunk())) {
+            const rawRows = chunk.getRowObjects(columnNames);
+            for (const row of rawRows) {
+                if (row && row[queryCol]) {
+                    queries.push(String(row[queryCol]));
+                }
             }
         }
         return queries;
@@ -155,76 +155,64 @@ async function runTests() {
 
     const hasMistralKey = !!(process.env.MISTRAL_API_KEY || process.env.MISTRAL_API_KEY1);
 
-    if (valPath && valQueries.length > 0 && hasMistralKey) {
+    if (valPath && valQueries.length > 0) {
         console.log(`  ✅ Found validation file at: "${valPath}"`);
-        console.log(`  ✅ Mistral API Key detected. Running live benchmark across ${valQueries.length} real validation queries...`);
+        console.log(`  📊 Loaded ${valQueries.length} total validation queries.`);
         
-        for (const query of valQueries) {
-            const totalStart = performance.now();
-
-            try {
-                // 1. Generate live query embedding (External HTTP call)
-                const queryVector = await getEmbedding(query);
-
-                // 2. Local RAG Retrieval Pipeline (FAISS + SQLite)
-                const localStart = performance.now();
-                const searchResult = vectorIndex.search(queryVector, 5);
-                searchResult.ids.forEach((matchId) => {
-                    const row = selectStmt.get(Number(matchId)) as any;
-                    if (row && row.translations) {
-                        JSON.parse(row.translations);
-                    }
-                });
-                const localDuration = performance.now() - localStart;
-                localLatencies.push(localDuration);
-
-                const totalDuration = performance.now() - totalStart;
-                totalLatencies.push(totalDuration);
-            } catch (e: any) {
-                console.warn(`  ⚠️ Skip query due to embedding error: ${e.message}`);
+        // A. Run Live Embedding query test on a slice (max 100 queries) if key is present
+        if (hasMistralKey) {
+            const liveQueries = valQueries.slice(0, 100);
+            console.log(`  ✅ Mistral API Key detected. Running live total pipeline benchmark across first ${liveQueries.length} queries...`);
+            
+            for (const query of liveQueries) {
+                const totalStart = performance.now();
+                try {
+                    // 1. Generate live query embedding (External HTTP call)
+                    const queryVector = await getEmbedding(query);
+                    const totalDuration = performance.now() - totalStart;
+                    totalLatencies.push(totalDuration);
+                } catch (e: any) {
+                    console.warn(`  ⚠️ Skip query due to embedding error: ${e.message}`);
+                }
             }
         }
+        
+        // B. Run Local Retrieval Database benchmark across ALL queries (using reconstructed vectors)
+        console.log(`  📊 Running local RAG database benchmark over ALL ${valQueries.length} validation queries...`);
+        for (let i = 0; i < valQueries.length; i++) {
+            const localStart = performance.now();
+            const id = BigInt(i % vectorIndex.ntotal);
+            const sampleVector = vectorIndex.reconstructBatch([id]);
+            const searchResult = vectorIndex.search(new Float32Array(sampleVector), 5);
+            searchResult.ids.forEach((matchId) => {
+                const row = selectStmt.get(Number(matchId)) as any;
+                if (row && row.translations) {
+                    JSON.parse(row.translations);
+                }
+            });
+            const localDuration = performance.now() - localStart;
+            localLatencies.push(localDuration);
+        }
     } else {
-        if (valPath && valQueries.length > 0) {
-            console.log(`  ✅ Found validation file at: "${valPath}"`);
-            console.log(`  ⚠️ MISTRAL_API_KEY missing. Mocking vector embeddings for validation query search...`);
-            
-            for (let i = 0; i < valQueries.length; i++) {
-                const localStart = performance.now();
-                const id = BigInt(i % vectorIndex.ntotal);
-                const sampleVector = vectorIndex.reconstructBatch([id]);
-                const searchResult = vectorIndex.search(new Float32Array(sampleVector), 5);
-                searchResult.ids.forEach((matchId) => {
-                    const row = selectStmt.get(Number(matchId)) as any;
-                    if (row && row.translations) {
-                        JSON.parse(row.translations);
-                    }
-                });
-                const localDuration = performance.now() - localStart;
-                localLatencies.push(localDuration);
-                totalLatencies.push(localDuration);
-            }
-        } else {
-            console.log(`  ⚠️ Validation file (hinval.parquet) not found or unreadable.`);
-            console.log(`  👉 Falling back to simulated query benchmark (reconstructed vector queries)...`);
-            
-            const ntotal = Math.min(vectorIndex.ntotal, 100);
-            const idsToTest = Array.from({ length: ntotal }, (_, idx) => BigInt(idx));
-            
-            for (const id of idsToTest) {
-                const localStart = performance.now();
-                const sampleVector = vectorIndex.reconstructBatch([id]);
-                const searchResult = vectorIndex.search(new Float32Array(sampleVector), 5);
-                searchResult.ids.forEach((matchId) => {
-                    const row = selectStmt.get(Number(matchId)) as any;
-                    if (row && row.translations) {
-                        JSON.parse(row.translations);
-                    }
-                });
-                const localDuration = performance.now() - localStart;
-                localLatencies.push(localDuration);
-                totalLatencies.push(localDuration);
-            }
+        console.log(`  ⚠️ Validation file (hinval.parquet) not found or unreadable.`);
+        console.log(`  👉 Falling back to simulated query benchmark (reconstructed vector queries)...`);
+        
+        const ntotal = Math.min(vectorIndex.ntotal, 100);
+        const idsToTest = Array.from({ length: ntotal }, (_, idx) => BigInt(idx));
+        
+        for (const id of idsToTest) {
+            const localStart = performance.now();
+            const sampleVector = vectorIndex.reconstructBatch([id]);
+            const searchResult = vectorIndex.search(new Float32Array(sampleVector), 5);
+            searchResult.ids.forEach((matchId) => {
+                const row = selectStmt.get(Number(matchId)) as any;
+                if (row && row.translations) {
+                    JSON.parse(row.translations);
+                }
+            });
+            const localDuration = performance.now() - localStart;
+            localLatencies.push(localDuration);
+            totalLatencies.push(localDuration);
         }
     }
 
