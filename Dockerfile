@@ -1,38 +1,55 @@
-FROM node:24-alpine as client
+# Stage 1: Build the client
+FROM node:24-slim as client
 
 WORKDIR /app
 
-COPY client/package*.json ./
+COPY Client/package*.json ./
 
-RUN npm install
+RUN npm install --no-audit --no-fund
 
-COPY client/ .
+COPY Client/ .
 
 RUN npm run build
 
-FROM node:24-alpine as server
+# Stage 2: Build the server
+FROM node:24-slim as server
 
 WORKDIR /app
 
+# Install build dependencies for compiling native C++ Node packages (faiss-node, better-sqlite3)
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY server/package*.json ./
 
-RUN npm install
+RUN npm install --no-audit --no-fund
 
 COPY server/ .
 
 RUN npm run build
 
-FROM node:24-alpine
+# Prune devDependencies to keep the image lightweight
+RUN npm prune --production
+
+# Stage 3: Final production image
+FROM node:24-slim
 
 WORKDIR /app
 
-COPY --from=server /app/dist ./
-
+# Copy production files and node modules (containing natively compiled packages)
+COPY --from=server /app/package*.json ./
+COPY --from=server /app/node_modules ./node_modules
+COPY --from=server /app/dist ./dist
 COPY --from=client /app/dist ./public
 
-# Copy index files from the indexing workspace folder into the final container
+# Copy compiled FAISS index and SQLite metadata into final container
 COPY indexing/indexes/aligned_english* ./indexes/aligned_english/
 
-EXPOSE 3000
+EXPOSE 5000
+
+ENV PORT=5000
+ENV NODE_ENV=production
 
 CMD ["npm", "start"]

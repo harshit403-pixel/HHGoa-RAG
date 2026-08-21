@@ -7,16 +7,25 @@ import logger from "../config/logger.config.js";
 
 const INDEX_ROOT = env.INDEX_ROOT || "/data/hhgoa/indexes";
 
-// Dynamically locate the RAG project root containing the precompiled indexing/node_modules
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-let rootDir = __dirname;
-while (rootDir && !fs.existsSync(path.join(rootDir, "indexing")) && path.dirname(rootDir) !== rootDir) {
-    rootDir = path.dirname(rootDir);
-}
+const requireLoc = createRequire(import.meta.url);
+let faiss: any;
+let Database: any;
 
-const require = createRequire(import.meta.url);
-const faiss = require(path.join(rootDir, "indexing/node_modules/faiss-napi"));
-const Database = require(path.join(rootDir, "indexing/node_modules/better-sqlite3"));
+try {
+    // Try loading standard production dependencies (e.g. inside Docker / Render environment)
+    faiss = requireLoc("faiss-node");
+    Database = requireLoc("better-sqlite3");
+} catch (e: any) {
+    logger.info("Could not load native dependencies from standard server node_modules. Falling back to precompiled indexing modules...");
+    // Fallback for local Windows VM development using precompiled indexing assets
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    let rootDir = __dirname;
+    while (rootDir && !fs.existsSync(path.join(rootDir, "indexing")) && path.dirname(rootDir) !== rootDir) {
+        rootDir = path.dirname(rootDir);
+    }
+    faiss = requireLoc(path.join(rootDir, "indexing/node_modules/faiss-napi"));
+    Database = requireLoc(path.join(rootDir, "indexing/node_modules/better-sqlite3"));
+}
 
 export interface SearchResult {
     score: number;
