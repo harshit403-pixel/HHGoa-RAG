@@ -8,8 +8,7 @@ import notFoundHandler from './shared/middlewares/NotFound.middleware.js';
 import errorHandler from './shared/middlewares/error.middleware.js';
 import { setupSwagger } from './shared/swagger.js';
 
-const serverDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const publicDirectory = path.join(serverDirectory, 'public');
+const publicDirectory = path.resolve(process.cwd(), 'public');
 const frontendIndex = path.join(publicDirectory, 'index.html');
 
 function createApp(): Express {
@@ -25,7 +24,7 @@ function createApp(): Express {
     if (existsSync(frontendIndex)) {
         app.use(express.static(publicDirectory));
 
-        app.get('/*path', (req, res) => res.sendFile(frontendIndex));
+        app.get('*', (req, res) => res.sendFile(frontendIndex));
     }
 
     app.use(notFoundHandler);
