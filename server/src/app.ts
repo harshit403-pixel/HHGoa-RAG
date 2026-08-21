@@ -24,7 +24,7 @@ function createApp(): Express {
     if (existsSync(frontendIndex)) {
         app.use(express.static(publicDirectory));
 
-        app.get('*', (req, res) => res.sendFile(frontendIndex));
+        app.get(/.*/, (req, res) => res.sendFile(frontendIndex));
     }
 
     app.use(notFoundHandler);
