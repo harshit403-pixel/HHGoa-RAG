@@ -69,6 +69,7 @@ function VoiceExperience({
     }
 
     if (isActive) {
+      stop();
       return;
     }
 
@@ -77,6 +78,7 @@ function VoiceExperience({
     isActive,
     isProcessing,
     start,
+    stop,
   ]);
 
   /*

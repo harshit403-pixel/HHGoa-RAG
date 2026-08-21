@@ -10,6 +10,7 @@ import {
   Check, 
   X 
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import SourceCard from "../answer/SourceCard";
 
 function Conversation({
@@ -112,10 +113,33 @@ function Conversation({
                 </div>
 
                 {/* Answer */}
-                <div className="max-w-3xl">
-                  <p className="text-[15px] leading-8 text-white/75 sm:text-base">
-                    {message.content || (isProcessing ? "Thinking..." : "")}
-                  </p>
+                <div className="max-w-3xl text-[15px] leading-8 text-white/75 sm:text-base">
+                  {message.content ? (
+                    <ReactMarkdown
+                      components={{
+                        p: ({ node, ...props }) => <p className="mb-4 last:mb-0" {...props} />,
+                        ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-4 space-y-1.5" {...props} />,
+                        ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-4 space-y-1.5" {...props} />,
+                        li: ({ node, ...props }) => <li {...props} />,
+                        strong: ({ node, ...props }) => <strong className="font-semibold text-white" {...props} />,
+                        code: ({ node, inline, ...props }) => 
+                          inline ? (
+                            <code className="bg-white/10 px-1.5 py-0.5 rounded font-mono text-sm text-cyan-300" {...props} />
+                          ) : (
+                            <pre className="bg-[#0c0c14] border border-white/[0.08] p-4 rounded-xl my-4 overflow-x-auto font-mono text-xs text-violet-300">
+                              <code {...props} />
+                            </pre>
+                          ),
+                        h1: ({ node, ...props }) => <h1 className="text-xl font-bold text-white mb-4 mt-6" {...props} />,
+                        h2: ({ node, ...props }) => <h2 className="text-lg font-bold text-white mb-3 mt-5" {...props} />,
+                        h3: ({ node, ...props }) => <h3 className="text-base font-bold text-white mb-2 mt-4" {...props} />,
+                      }}
+                    >
+                      {message.content}
+                    </ReactMarkdown>
+                  ) : (
+                    isProcessing ? "Thinking..." : ""
+                  )}
                 </div>
 
                 {/* Cool Latency Diagnostics Dashboard */}

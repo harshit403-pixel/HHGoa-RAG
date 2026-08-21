@@ -51,6 +51,11 @@ function useOrbParallax({
 
   useEffect(() => {
     const handlePointerMove = (event) => {
+      // Disable cursor follower on touchscreens and mobile viewports
+      if (event.pointerType === "touch" || event.pointerType === "pen" || window.innerWidth < 768) {
+        return;
+      }
+
       const normalizedX =
         (event.clientX / window.innerWidth) * 2 - 1;
 
