@@ -8,38 +8,190 @@ A production-grade, ultra-fast **Multilingual Retrieval-Augmented Generation (RA
 
 The system runs in two main pipelines: **Indexing** (offline compilation) and **Retrieval & Answer Generation** (online runtime). 
 
-> [!NOTE]
-> You can open the architecture schematic file [`rag-pipeline-architecture.excalidraw`](./rag-pipeline-architecture.excalidraw) directly on [Excalidraw](https://excalidraw.com) to view the visual layout of these blocks.
+---
 
 ### 1. Offline Indexing Pipeline
+
+The indexing pipeline takes a multilingual document corpus (source Parquet file) and compiles it into a dual-layered search engine index consisting of a FAISS vector index and a local SQLite metadata database.
+
+#### 📊 Indexing Execution Flow
 ```mermaid
-graph TD
-    A[hinval.parquet / Multilingual Corpus] --> B[Semantic & Window Chunking]
-    B --> C[English Alignment Translation]
-    C --> D[Mistral text-embedding-v1]
-    D --> E[FAISS HNSW Vector Index]
-    C --> F[SQLite Metadata Database metadata.db]
-    F -->|Keyed by faiss_id| E
+sequenceDiagram
+    autonumber
+    participant D as Parquet Corpus
+    participant C as Chunking Engine
+    participant T as Sarvam Translator
+    participant E as Mistral Embedder
+    participant F as FAISS Index
+    participant S as SQLite DB (metadata.db)
+
+    D->>C: Read Row (query_id, passage, target_lang)
+    Note over C: Evaluate length vs. 900-char threshold
+    alt Length <= 900 chars
+        C->>C: Select Strategy 1: Keep Whole
+    else Length > 900 chars
+        C->>C: Select Strategy 2: Semantic Split (700/100 Overlap)
+    end
+    C->>T: Send raw Indic passage chunk
+    T->>C: Return English translation (mayura:v1)
+    C->>E: Send English text segment
+    E->>C: Return 1024-dimension float vector
+    C->>F: addBatch(faiss_id, vector) [Register in HNSW L2 Graph]
+    C->>S: INSERT INTO chunks (faiss_id, chunk_id, parent_id, text, translations, ...)
 ```
 
+#### 📝 Step-by-Step Indexing Trace Example
+
+##### Input Row
+We start with a raw Hindi fact row from `hinval.parquet`:
+* **`query_id`**: `42`
+* **`passage_index`**: `3`
+* **`target_lang`**: `"hi"`
+* **`passage`**: `"भारत की राजधानी नई दिल्ली है। यह एक ऐतिहासिक शहर है जिसमें लाल किला और इंडिया गेट जैसे प्रसिद्ध स्मारक हैं।"`
+
+##### Step 1: Chunking Selection (Strategy 1 - Whole)
+* **Action**: The length of the passage is 95 characters.
+* **Evaluation**: $95 \le 900$ (below the `SHORT_PASSAGE_CHARS` threshold).
+* **Output**: The entire passage is kept as a single chunk.
+  * `chunk_id`: `"42-p3-c0"`
+  * `parent_id`: `"42-p3"`
+  * `chunk_type`: `"whole"`
+
+##### Step 2: English Translation Alignment
+* **Action**: The chunk is sent to the Sarvam Translation API using the `mayura:v1` model.
+  * `source_language_code`: `"hi"`
+  * `target_language_code`: `"en-IN"`
+* **Output**: The API returns the English aligned translation:
+  * `translated_text`: `"New Delhi is the capital of India. It is a historical city with famous monuments like the Red Fort and India Gate."`
+
+##### Step 3: Vector Embedding Generation
+* **Action**: The English text is sent to the Mistral Embeddings API (`mistral-embed`).
+* **Output**: The API returns a `Float32Array` of size 1024:
+  * `vector`: `[0.0124, -0.0452, 0.0891, ..., 0.0031]`
+
+##### Step 4: FAISS Registration
+* **Action**: The vector is appended to the FAISS index with a unique sequential ID.
+  * `faiss_id`: `1042` (monotonic counter)
+* **Output**: The vector is inserted into the HNSW graph L2 space under ID `1042`.
+
+##### Step 5: SQLite Database Injection
+* **Action**: The metadata database stores the raw text and its translations.
+* **SQL Query**:
+  ```sql
+  INSERT INTO chunks (faiss_id, chunk_id, parent_id, text, query_id, passage_index, chunk_index, chunk_type, translations)
+  VALUES (
+    1042, 
+    '42-p3-c0', 
+    '42-p3', 
+    'New Delhi is the capital of India. It is a historical city with famous monuments like the Red Fort and India Gate.', 
+    42, 
+    3, 
+    0, 
+    'whole', 
+    '{"hi": "भारत की राजधानी नई दिल्ली है। यह एक ऐतिहासिक शहर है जिसमें लाल किला और इंडिया गेट..."}'
+  );
+  ```
+* **Result**: SQLite creates a B-Tree entry on the Primary Key `faiss_id`.
+
+---
+
 ### 2. Online Retrieval & Generation Pipeline
+
+The retrieval pipeline takes a user's question, aligns it to English, performs a vector search in FAISS, retrieves the correct multilingual translation from SQLite, and generates a streaming answer.
+
+#### 🌐 Retrieval Execution Flow
 ```mermaid
-graph TD
-    User([User Voice or Text]) --> STT{Voice Input?}
-    STT -->|Yes| STT_Proc[Sarvam Speech-to-Text]
-    STT -->|No| Guard[Input Guardrails Check]
-    STT_Proc --> Trans[Sarvam Translation to English]
-    Trans --> Guard
-    Guard -->|Passed| Embed[Mistral Query Embedding]
-    Guard -->|Blocked| Block[Reject & Emit Error]
-    Embed --> FAISS[FAISS Similarity Search]
-    FAISS -->|Top 5 Matches| Ground{Groundedness Check}
-    Ground -->|Passed| SQL[SQLite Context Retrieval]
-    Ground -->|Failed| Fallback[LLM General Knowledge Fallback]
-    SQL --> LLM[LangChain ChatMistralAI Stream]
-    Fallback --> LLM
-    LLM --> Stream([Streaming Answer to UI])
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant V as Voice / STT
+    participant T as Sarvam Translator
+    participant G1 as Input Guardrails
+    participant E as Mistral Embedder
+    participant F as FAISS Index
+    participant G2 as Grounding Guard
+    participant S as SQLite DB (metadata.db)
+    participant L as LangChain LLM
+
+    U->>V: Record Voice Audio Query (wav)
+    V->>V: Transcribe using saaras:v3
+    V->>T: Translate query to English
+    T->>G1: Check if query contains jailbreaks / off-topic coding triggers
+    alt Guardrail Blocked
+        G1->>U: Stream Reject Error & Abort
+    else Guardrail Passed
+        G1->>E: Send English Query Text
+        E->>F: Search HNSW index with query vector
+        F->>G2: Return top 5 matching IDs & L2 scores
+        Note over G2: Evaluate top score vs. -5.0 threshold
+        alt Grounding Checked (Passed)
+            G2->>S: SELECT translations WHERE faiss_id = ?
+            S->>L: Pass retrieved context text
+        else Grounding Checked (Failed)
+            G2->>L: Pass [No matching context found]
+        end
+        L->>U: Stream streaming token chunks in real-time
+    end
 ```
+
+#### 📝 Step-by-Step Retrieval Trace Example
+
+##### Step 1: Speech-to-Text (STT)
+* **Action**: User clicks the purple blob on the UI and speaks: *"भारत की राजधानी क्या है?"*
+* **Transcription Output**: Sarvam's `saaras:v3` model transcribes the WAV audio buffer:
+  * `transcript`: `"भारत की राजधानी क्या है?"`
+  * `language_code`: `"hi-IN"`
+
+##### Step 2: Query Translation Alignment
+* **Action**: The transcribed Hindi text is sent to the Sarvam Translate API:
+  * `input`: `"भारत की राजधानी क्या है?"`
+  * `source_language_code`: `"hi"`
+  * `target_language_code`: `"en-IN"`
+* **Output**: The API returns:
+  * `translated_text`: `"What is the capital of India?"`
+
+##### Step 3: Input Guardrails Check
+* **Action**: The query is scanned against the security and off-topic list.
+  * Query: `"what is the capital of india?"`
+  * Security Match: None.
+  * Off-Topic Match: None.
+* **Output**: Guardrails pass successfully.
+
+##### Step 4: Query Embedding
+* **Action**: The English query `"What is the capital of India?"` is embedded.
+* **Output**: The Mistral Embeddings API returns a 1024-dimension query vector:
+  * `queryVector`: `[0.0118, -0.0421, 0.0815, ..., 0.0029]`
+
+##### Step 5: FAISS Similarity Search
+* **Action**: The query vector is searched against the loaded HNSW L2 vector index (`activeFolder = "aligned_english"`).
+* **Output**: FAISS finds the top matching vector IDs:
+  * Match 1: `faiss_id = 1042`, `distance = 0.1423`
+
+##### Step 6: Grounding Verification
+* **Action**: The top match L2 score is evaluated against the `-5.0` confidence limit.
+  * Score: `-0.1423` (where `0.0` is a perfect match).
+  * Evaluation: $-0.1423 \ge -5.0$.
+* **Output**: Grounding check passes (`hasContext = true`).
+
+##### Step 7: SQLite DB Metadata Seek
+* **Action**: The system queries SQLite using the matching `faiss_id` to retrieve translation segments.
+* **SQL Query**:
+  ```sql
+  SELECT * FROM chunks WHERE faiss_id = 1042;
+  ```
+* **Output**: SQLite executes a B-Tree search and returns the metadata row. Since the user's source language is `"hi-IN"` (Hindi), the system parses the `translations` column JSON object (`translations.hi`) and retrieves the Hindi translation text:
+  * `text`: `"भारत की राजधानी नई दिल्ली है। यह एक ऐतिहासिक शहर है जिसमें लाल किला और इंडिया गेट..."`
+
+##### Step 8: Contextual LLM Streaming
+* **Action**: The system formats the prompt for the Mistral model:
+  ```
+  Context:
+  [Source 1]: भारत की राजधानी नई दिल्ली है। यह एक ऐतिहासिक शहर है जिसमें लाल किला और इंडिया गेट...
+
+  User Language: hi-IN
+  ```
+* **Output**: The LangChain `ChatMistralAI` model receives the system instructions and streams the response tokens back to the UI in Hindi:
+  * Chunks: `"भारत "` ➡️ `"की "` ➡️ `"राजधानी "` ➡️ `"नई "` ➡️ `"दिल्ली "` ➡️ `"है।"`
 
 ---
 
