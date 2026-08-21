@@ -47,11 +47,12 @@ export class ModelHarness {
         // 1. Basic safety checks
         const unsafeKeywords = [
             "jailbreak", "ignore previous instructions", "system prompt",
-            "hack", "exploit", "kill", "suicide", "bomb", "bypass"
+            "hack", "exploit", "kill", "suicide", "bomb", "bypass",
+            "unlock", "passcode", "password", "crack", "reset lock", "bypass lock", "without permission"
         ];
         for (const keyword of unsafeKeywords) {
             if (lower.includes(keyword)) {
-                return { passed: false, reason: "Unsafe input detected (keyword match)" };
+                return { passed: false, reason: "Unsafe input detected (security guardrail trigger)" };
             }
         }
 
