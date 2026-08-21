@@ -24,7 +24,7 @@ function OrbMouth({
   return (
     <motion.div
       aria-hidden="true"
-      className="shrink-0 rounded-full bg-black"
+      className="shrink-0 rounded-full bg-[#171717]"
       animate={{
         width: isListening ? width : compact ? 20 : 38,
         height: isListening ? height : compact ? 11 : 18,

@@ -18,7 +18,7 @@ function OrbVisual({
           inset-[5%]
           z-0
           rounded-full
-          bg-violet-500/20
+          bg-[#08733F]/20
           blur-[50px]
         "
         animate={{
@@ -37,7 +37,7 @@ function OrbVisual({
         }}
       />
 
-      {/* Orb body (Pure CSS Solid Purple) */}
+      {/* Orb body */}
       <motion.div
         className="
           absolute
@@ -46,10 +46,10 @@ function OrbVisual({
           h-full
           w-full
           rounded-full
-          bg-[#8b5cf6]
+          bg-[#0B6839]
           border
           border-white/10
-          shadow-[0_0_80px_rgba(139,92,246,0.25)]
+          shadow-[0_0_80px_rgba(8,115,63,0.25)]
           select-none
         "
         animate={{
