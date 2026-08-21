@@ -1,5 +1,15 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
+import { 
+  Search, 
+  Database, 
+  Mic, 
+  Globe, 
+  Brain, 
+  Zap, 
+  Check, 
+  X 
+} from "lucide-react";
 import SourceCard from "../answer/SourceCard";
 
 function Conversation({
@@ -108,6 +118,9 @@ function Conversation({
                   </p>
                 </div>
 
+                {/* Cool Latency Diagnostics Dashboard */}
+                <LatencyDashboard performance={message.performance} />
+
                 {/* Sources */}
                 {message.sources?.length > 0 && (
                   <div>
@@ -170,6 +183,103 @@ function Conversation({
   );
 }
 
+function LatencyDashboard({ performance }) {
+  if (!performance) return null;
+
+  const searchTime = performance.search || 0;
+  const retrieveTime = performance.retrieve || 0;
+  const retrievalTime = searchTime + retrieveTime;
+  const totalTime = performance.total || 0;
+  const embedTime = performance.embed || 0;
+  const translateTime = performance.translate || 0;
+  const sttTime = performance.stt || 0;
+
+  return (
+    <div className="my-6 rounded-2xl border border-emerald-500/10 bg-emerald-500/[0.02] p-5 backdrop-blur-md">
+      <div className="grid gap-5 md:grid-cols-3">
+        {/* Left card: Neon speed metric */}
+        <div className="flex flex-col justify-center rounded-xl bg-white/[0.015] border border-white/[0.04] p-4 text-center md:col-span-1">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+            Index Retrieval Time
+          </span>
+          <span className="mt-2 text-2xl font-mono font-bold tracking-tight text-white">
+            {retrievalTime.toFixed(4)} <span className="text-sm font-medium text-emerald-300">ms</span>
+          </span>
+          <span className="mt-1 text-[9px] text-white/30">
+            (FAISS Search + SQLite Metadata)
+          </span>
+        </div>
+
+        {/* Right card: Stacked micro-bar latency diagram */}
+        <div className="flex flex-col justify-between rounded-xl bg-white/[0.015] border border-white/[0.04] p-4 md:col-span-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40 mb-3 block">
+            RAG Pipeline Latency Diagnostics
+          </span>
+          <div className="space-y-2.5">
+            {/* Search */}
+            <div>
+              <div className="flex justify-between text-[10px] font-mono text-white/60 mb-1">
+                <span className="flex items-center gap-1.5">
+                  <Search className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                  <span>Vector Similarity Search (FAISS)</span>
+                </span>
+                <span className="font-bold text-white/80">{searchTime.toFixed(4)} ms</span>
+              </div>
+              <div className="h-1 w-full bg-white/[0.03] rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-cyan-400 rounded-full" 
+                  style={{ width: `${Math.min(100, (searchTime / (retrievalTime || 1)) * 100)}%` }} 
+                />
+              </div>
+            </div>
+
+            {/* Fetch */}
+            <div>
+              <div className="flex justify-between text-[10px] font-mono text-white/60 mb-1">
+                <span className="flex items-center gap-1.5">
+                  <Database className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+                  <span>SQL metadata & translations (SQLite)</span>
+                </span>
+                <span className="font-bold text-white/80">{retrieveTime.toFixed(4)} ms</span>
+              </div>
+              <div className="h-1 w-full bg-white/[0.03] rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-violet-400 rounded-full" 
+                  style={{ width: `${Math.min(100, (retrieveTime / (retrievalTime || 1)) * 100)}%` }} 
+                />
+              </div>
+            </div>
+
+            {/* Pipeline Info */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-white/[0.05] pt-2.5 mt-2.5 text-[9px] font-mono text-white/30">
+              {sttTime > 0 && (
+                <span className="flex items-center gap-1">
+                  <Mic className="h-3 w-3 text-white/40 shrink-0" />
+                  <span>STT: <strong className="text-white/50">{sttTime.toFixed(4)}ms</strong></span>
+                </span>
+              )}
+              {translateTime > 0 && (
+                <span className="flex items-center gap-1">
+                  <Globe className="h-3 w-3 text-white/40 shrink-0" />
+                  <span>Translation: <strong className="text-white/50">{translateTime.toFixed(4)}ms</strong></span>
+                </span>
+              )}
+              <span className="flex items-center gap-1">
+                <Brain className="h-3 w-3 text-white/40 shrink-0" />
+                <span>Embed: <strong className="text-white/50">{embedTime.toFixed(4)}ms</strong></span>
+              </span>
+              <span className="ml-auto flex items-center gap-1">
+                <Zap className="h-3 w-3 text-emerald-400 shrink-0 animate-pulse" />
+                <span>Full RAG Loop: <strong className="text-emerald-400 font-bold">{totalTime.toFixed(4)}ms</strong></span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PipelineConsole({ statusUpdates = [], isProcessing = false }) {
   const terminalEndRef = useRef(null);
 
@@ -199,24 +309,24 @@ function PipelineConsole({ statusUpdates = [], isProcessing = false }) {
           const isDone = update.step.endsWith("_done") || update.step === "guardrails_done" || update.step === "generate_done";
           const isFailed = update.step.endsWith("_failed");
           
-          let prefix = "●";
+          let prefixIcon = <span className="h-1.5 w-1.5 rounded-full bg-violet-400/50 shrink-0 mt-2" />;
           let color = "text-violet-300/60";
           if (isDone) {
-            prefix = "✔";
+            prefixIcon = <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />;
             color = "text-emerald-400/90";
           } else if (isFailed) {
-            prefix = "✖";
+            prefixIcon = <X className="h-3.5 w-3.5 text-red-400 shrink-0 mt-0.5" />;
             color = "text-red-400";
           } else if (isProcessing && idx === statusUpdates.length - 1) {
-            prefix = "⚡";
+            prefixIcon = <Zap className="h-3.5 w-3.5 text-cyan-400 animate-pulse shrink-0 mt-0.5" />;
             color = "text-cyan-400 animate-pulse";
           }
           
           return (
             <div key={idx} className={`flex items-start gap-2 leading-relaxed ${color}`}>
               <span className="shrink-0 font-medium text-white/25">[{timeStr}]</span>
-              <span className="shrink-0 font-bold">{prefix}</span>
-              <span>
+              <span className="shrink-0 flex items-center justify-center h-4 w-4">{prefixIcon}</span>
+              <span className="whitespace-pre-wrap break-all">
                 {update.message}
                 {update.latency !== undefined && (
                   <span className="ml-2 rounded bg-white/[0.06] px-1 py-0.5 text-[9px] font-semibold text-white/40">
@@ -234,6 +344,12 @@ function PipelineConsole({ statusUpdates = [], isProcessing = false }) {
 }
 
 function ProcessingMessage() {
+  const dotTransition = {
+    duration: 0.6,
+    repeat: Infinity,
+    ease: "easeInOut",
+  };
+
   return (
     <motion.div
       initial={{
@@ -249,15 +365,31 @@ function ProcessingMessage() {
       }}
       className="flex items-center gap-3 py-4 text-sm text-white/35"
     >
-      <div className="flex items-center gap-1.5">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" />
-
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400 [animation-delay:150ms]" />
-
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400 [animation-delay:300ms]" />
+      <div className="flex items-center gap-1.5 h-3 pt-1">
+        <motion.span
+          animate={{ y: [0, -6, 0] }}
+          transition={dotTransition}
+          className="block h-1.5 w-1.5 rounded-full bg-violet-400"
+        />
+        <motion.span
+          animate={{ y: [0, -6, 0] }}
+          transition={{
+            ...dotTransition,
+            delay: 0.15,
+          }}
+          className="block h-1.5 w-1.5 rounded-full bg-violet-400"
+        />
+        <motion.span
+          animate={{ y: [0, -6, 0] }}
+          transition={{
+            ...dotTransition,
+            delay: 0.3,
+          }}
+          className="block h-1.5 w-1.5 rounded-full bg-violet-400"
+        />
       </div>
 
-      <span>
+      <span className="font-medium tracking-wide">
         Searching the knowledge base...
       </span>
     </motion.div>

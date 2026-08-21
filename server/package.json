@@ -10,6 +10,8 @@
         "dev": "tsx watch server.ts"
     },
     "dependencies": {
+        "@langchain/core": "^1.2.9",
+        "@langchain/mistralai": "^1.2.0",
         "better-sqlite3": "^13.0.3",
         "compression": "^1.8.0",
         "cookie-parser": "^1.4.7",

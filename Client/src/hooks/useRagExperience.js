@@ -7,9 +7,7 @@ const INITIAL_STATE = {
   statusUpdates: [],
 };
 
-const API_BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-  ? "http://localhost:5000"
-  : window.location.origin;
+const API_BASE = "";
 
 function useRagExperience() {
   const [state, setState] = useState(INITIAL_STATE);
@@ -38,7 +36,7 @@ function useRagExperience() {
         {
           id: userMsgId,
           role: "user",
-          content: isAudio ? "🎙️ Transcribing voice..." : payload,
+          content: isAudio ? "Transcribing voice..." : payload,
         },
         {
           id: assistantMsgId,
@@ -103,6 +101,18 @@ function useRagExperience() {
               
               // Handle SSE Events
               if (currentEvent === "status") {
+                if (data.step === "stt_done" || data.step === "stt_none") {
+                  setState((current) => ({
+                    ...current,
+                    messages: current.messages.map((m) => {
+                      if (m.id === userMsgId) {
+                        return { ...m, content: data.queryText };
+                      }
+                      return m;
+                    }),
+                  }));
+                }
+
                 setState((current) => ({
                   ...current,
                   statusUpdates: [
@@ -123,7 +133,18 @@ function useRagExperience() {
                       return { ...m, content: data.query };
                     }
                     if (m.id === assistantMsgId) {
-                      return { ...m, sources: data.citations };
+                      return { 
+                        ...m, 
+                        sources: data.citations,
+                        performance: {
+                          stt: data.sttMs,
+                          translate: data.translationMs,
+                          search: data.searchMs,
+                          embed: data.embedMs,
+                          retrieve: data.retrieveMs,
+                          total: data.totalMs
+                        }
+                      };
                     }
                     return m;
                   }),

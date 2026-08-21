@@ -1,11 +1,22 @@
-import faiss from "faiss-node";
-import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import env from "../config/env.config.js";
 import logger from "../config/logger.config.js";
 
 const INDEX_ROOT = env.INDEX_ROOT || "/data/hhgoa/indexes";
+
+// Dynamically locate the RAG project root containing the precompiled indexing/node_modules
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+let rootDir = __dirname;
+while (rootDir && !fs.existsSync(path.join(rootDir, "indexing")) && path.dirname(rootDir) !== rootDir) {
+    rootDir = path.dirname(rootDir);
+}
+
+const require = createRequire(import.meta.url);
+const faiss = require(path.join(rootDir, "indexing/node_modules/faiss-napi"));
+const Database = require(path.join(rootDir, "indexing/node_modules/better-sqlite3"));
 
 export interface SearchResult {
     score: number;
@@ -66,9 +77,9 @@ const LANG_MAP: Record<string, string> = {
 };
 
 export class LanguageSearcher {
-    private readonly index: faiss.Index;
-    private readonly db: Database.Database;
-    private readonly selectStmt: Database.Statement;
+    private readonly index: any;
+    private readonly db: any;
+    private readonly selectStmt: any;
 
     constructor(faissFile: string, dbFile: string) {
         logger.info({ faissFile, dbFile }, "Loading native FAISS index and metadata store");

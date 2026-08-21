@@ -35,27 +35,37 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
 
     const sendEvent = (event: string, data: any) => {
         res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        if (typeof (res as any).flush === "function") {
+            (res as any).flush();
+        }
     };
 
+    const pipelineStart = performance.now();
     let queryText = "";
     let userLanguage = "en-IN";
     let sttMs = 0;
     let translationMs = 0;
+    let guardrailsMs = 0;
+    let embedMs = 0;
     let searchMs = 0;
+    let groundingMs = 0;
+    let retrieveMs = 0;
 
     try {
         // 2. Handle audio input (STT) or text input
         if (req.file) {
-            sendEvent("status", { step: "stt", message: "Transcribing audio input using Sarvam AI...", timestamp: Date.now() });
+            sendEvent("status", { step: "stt_start", message: "RAG pipeline started - Transcribing audio...", timestamp: Date.now() });
             const sttStart = performance.now();
             const transcription = await transcribeAudio(req.file.buffer, req.file.originalname);
-            sttMs = Math.round(performance.now() - sttStart);
+            sttMs = Number((performance.now() - sttStart).toFixed(4));
 
             queryText = transcription.transcript;
             userLanguage = transcription.language_code || "en-IN";
             sendEvent("status", { 
                 step: "stt_done", 
-                message: `Transcription complete in ${sttMs}ms: "${queryText}"`, 
+                message: `[Speech-to-Text] took ${sttMs} ms. Transcribed: "${queryText}"`, 
+                queryText,
+                userLanguage,
                 timestamp: Date.now(), 
                 latency: sttMs 
             });
@@ -63,7 +73,13 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
             const body = req.body || {};
             queryText = String(body.query || "").trim();
             userLanguage = String(body.language || "en-IN").trim();
-            sendEvent("status", { step: "text_input", message: `Received text query: "${queryText}"`, timestamp: Date.now() });
+            sendEvent("status", { 
+                step: "stt_none", 
+                message: `RAG pipeline started - Received text query: "${queryText}"`, 
+                queryText,
+                userLanguage,
+                timestamp: Date.now() 
+            });
         }
 
         if (!queryText) {
@@ -92,54 +108,57 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
 
         // 4. Translate query to English if the input language is not English
         if (translationNeeded) {
-            sendEvent("status", { step: "translate", message: `Translating query from [${userLanguage}] to English...`, timestamp: Date.now() });
+            sendEvent("status", { step: "translate_start", message: `Translating query to English...`, timestamp: Date.now() });
             const transStart = performance.now();
             // Translate the query to English (en-IN)
             const translation = await translateText(queryText, userLanguage, "en-IN");
-            translationMs += Math.round(performance.now() - transStart);
+            translationMs = Number((performance.now() - transStart).toFixed(4));
             translatedQuery = translation.translated_text;
             sendEvent("status", { 
                 step: "translate_done", 
-                message: `Translation complete in ${translationMs}ms: "${translatedQuery}"`, 
+                message: `[Query Translation] took ${translationMs} ms. Translated: "${translatedQuery}"`, 
+                translatedQuery,
                 timestamp: Date.now(), 
                 latency: translationMs 
             });
         }
 
         // 4b. Input Safety & Off-Topic Guardrail Check
-        sendEvent("status", { step: "guardrails", message: "Running safety and topic guardrails...", timestamp: Date.now() });
+        sendEvent("status", { step: "guardrails_start", message: "Running safety and off-topic guardrails...", timestamp: Date.now() });
+        const guardStart = performance.now();
         const inputGuard = await ModelHarness.checkInputGuardrail(queryText);
+        guardrailsMs = Number((performance.now() - guardStart).toFixed(4));
         if (!inputGuard.passed) {
             logger.warn({ queryText, reason: inputGuard.reason }, "Input rejected by guardrails");
+            sendEvent("status", { step: "guardrails_failed", message: `[Guardrails Rejection] took ${guardrailsMs} ms. Blocked: ${inputGuard.reason}`, timestamp: Date.now() });
             sendEvent("error", { message: `Blocked: ${inputGuard.reason}` });
-            sendEvent("status", { step: "guardrails_failed", message: `Guardrails rejection: ${inputGuard.reason}`, timestamp: Date.now() });
             res.end();
             return;
         }
-        sendEvent("status", { step: "guardrails_done", message: "Safety and topic guardrails passed successfully.", timestamp: Date.now() });
+        sendEvent("status", { step: "guardrails_done", message: `[Guardrails Analysis] took ${guardrailsMs} ms. Status: Passed.`, timestamp: Date.now(), latency: guardrailsMs });
 
         // 5. Embed the query using Mistral with Retry Orchestrator
-        sendEvent("status", { step: "embed", message: "Generating text vector embeddings using Mistral API...", timestamp: Date.now() });
+        sendEvent("status", { step: "embed_start", message: "Generating query vector embedding...", timestamp: Date.now() });
         const queryToEmbed = translationNeeded ? translatedQuery : queryText;
         const embedStart = performance.now();
         const queryVector = await ModelHarness.executeWithRetry(() => getEmbedding(queryToEmbed));
-        const embedMs = Math.round(performance.now() - embedStart);
+        embedMs = Number((performance.now() - embedStart).toFixed(4));
         sendEvent("status", { 
             step: "embed_done", 
-            message: `Text query embedded in ${embedMs}ms.`, 
+            message: `[Vector Embedding] took ${embedMs} ms`, 
             timestamp: Date.now(), 
             latency: embedMs 
         });
 
         // 6. Vector similarity search in the unified English index
-        sendEvent("status", { step: "search", message: "Searching local FAISS HNSW vector database...", timestamp: Date.now() });
+        sendEvent("status", { step: "search_start", message: "Searching local FAISS vector index...", timestamp: Date.now() });
         const searcher = getSearcher(activeFolder);
         const searchStart = performance.now();
         const rawResults = searcher.search(queryVector, 5);
-        searchMs = Math.round(performance.now() - searchStart);
+        searchMs = Number((performance.now() - searchStart).toFixed(4));
         sendEvent("status", { 
             step: "search_done", 
-            message: `Vector search complete in ${searchMs}ms. Found ${rawResults.length} matches.`, 
+            message: `[Vector Index Search] took ${searchMs} ms. Found ${rawResults.length} matches.`, 
             timestamp: Date.now(), 
             latency: searchMs 
         });
@@ -147,11 +166,13 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
         logger.info({ folder: activeFolder, count: rawResults.length, searchMs, embedMs }, "FAISS search complete");
 
         // 6b. Groundedness / Hallucination Guardrail Check
-        sendEvent("status", { step: "grounding", message: "Running groundedness analysis & hallucination checks...", timestamp: Date.now() });
+        sendEvent("status", { step: "grounding_start", message: "Checking retrieval groundedness thresholds...", timestamp: Date.now() });
+        const groundingStart = performance.now();
         const groundingGuard = ModelHarness.checkRetrievalGrounding(rawResults);
+        groundingMs = Number((performance.now() - groundingStart).toFixed(4));
         if (!groundingGuard.passed) {
             logger.info({ queryText, reason: groundingGuard.reason }, "Refusing to answer due to grounding guardrails");
-            sendEvent("status", { step: "grounding_failed", message: `Refusal: ${groundingGuard.reason}`, timestamp: Date.now() });
+            sendEvent("status", { step: "grounding_failed", message: `[Groundedness Verification] took ${groundingMs} ms. Status: Rejected (${groundingGuard.reason})`, timestamp: Date.now() });
             sendEvent("metadata", {
                 query: queryText,
                 userLanguage,
@@ -162,6 +183,8 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
                 translationMs,
                 searchMs,
                 embedMs,
+                retrieveMs: 0,
+                totalMs: Number((performance.now() - pipelineStart).toFixed(4)),
                 citations: []
             });
             sendEvent("chunk", { text: "I cannot find the answer in the provided documents." });
@@ -169,10 +192,11 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
             res.end();
             return;
         }
-        sendEvent("status", { step: "grounding_done", message: "Groundedness verified. Retrieved documents match confidence threshold.", timestamp: Date.now() });
+        sendEvent("status", { step: "grounding_done", message: `[Groundedness Verification] took ${groundingMs} ms. Status: Passed.`, timestamp: Date.now(), latency: groundingMs });
 
         // 7. Extract the target language translation locally from the database (zero external API calls!)
-        sendEvent("status", { step: "retrieve", message: "Extracting multilingual translations from SQLite database...", timestamp: Date.now() });
+        sendEvent("status", { step: "retrieve_start", message: "Retrieving multilingual translations from SQLite DB...", timestamp: Date.now() });
+        const retrieveStart = performance.now();
         const citations = rawResults.map(r => {
             let text = r.text; // Default to English
             if (baseLang !== "en" && r.translations) {
@@ -190,7 +214,12 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
                 text
             };
         });
-        sendEvent("status", { step: "retrieve_done", message: "Multi-lingual document text resolved locally (0 API calls).", timestamp: Date.now() });
+        retrieveMs = Number((performance.now() - retrieveStart).toFixed(4));
+        sendEvent("status", { step: "retrieve_done", message: `[Local Metadata Retrieval] took ${retrieveMs} ms. Fetched 5 context translations.`, timestamp: Date.now(), latency: retrieveMs });
+
+        // Calculate and send RAG pipeline end event
+        const totalMs = Number((performance.now() - pipelineStart).toFixed(4));
+        sendEvent("status", { step: "pipeline_done", message: `RAG pipeline ended in ${totalMs} ms`, timestamp: Date.now(), latency: totalMs });
 
         // Send metadata & citations to the frontend immediately
         sendEvent("metadata", {
@@ -203,6 +232,8 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
             translationMs,
             searchMs,
             embedMs,
+            retrieveMs,
+            totalMs,
             citations: citations.map(c => ({
                 chunk_id: c.chunk_id,
                 score: c.score,
@@ -213,13 +244,15 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
         });
 
         // 8. Generate answer using Mistral Chat API
-        sendEvent("status", { step: "generate", message: "Synthesizing answer using Mistral Chat Completion...", timestamp: Date.now() });
         const contextString = citations.map((c, i) => `[Source ${i + 1}]: ${c.text}`).join("\n\n");
         const systemPrompt = `You are a professional assistant. Answer the user's question in detail based ONLY on the provided context. If the context does not contain the answer, say "I cannot find the answer in the provided documents." DO NOT make up information.
 Your response MUST be written in the user's language: ${userLanguage}.
 
 Context:
 ${contextString}`;
+
+        // Send the exact prompt given to AI
+        sendEvent("status", { step: "prompt_given", message: `Prompt given to AI:\n\n${systemPrompt}\n\n[User Query]: "${queryText}"`, timestamp: Date.now() });
 
         logger.info("Starting streaming Mistral chat completion response");
         for await (const chunk of streamChatCompletion(systemPrompt, queryText)) {

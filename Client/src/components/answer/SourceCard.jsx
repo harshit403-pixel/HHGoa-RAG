@@ -4,7 +4,7 @@ function SourceCard({
 }) {
   const score =
     typeof source.score === "number"
-      ? Math.round(source.score * 100)
+      ? Math.round(Math.max(0, 1 - Math.abs(source.score)) * 100)
       : null;
 
   return (

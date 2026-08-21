@@ -1,3 +1,5 @@
+import { ChatMistralAI } from "@langchain/mistralai";
+import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import env from "../config/env.config.js";
 import logger from "../config/logger.config.js";
 
@@ -27,6 +29,18 @@ function getApiKey(): string {
     const key = apiKeys[keyIndex];
     keyIndex = (keyIndex + 1) % apiKeys.length;
     return key;
+}
+
+/**
+ * Instantiates and returns a configured ChatMistralAI agent using the next key in the pool.
+ */
+export function createAgent(): ChatMistralAI {
+    const apiKey = getApiKey();
+    return new ChatMistralAI({
+        modelName: "mistral-large-latest",
+        apiKey: apiKey,
+        temperature: 0,
+    });
 }
 
 /**
@@ -69,72 +83,28 @@ export async function getEmbedding(text: string): Promise<Float32Array> {
 }
 
 /**
- * Calls Mistral Chat Completion API in streaming mode.
+ * Calls Mistral Chat Completion API in streaming mode using LangChain's ChatMistralAI agent.
  * Yields text tokens as they arrive.
  */
 export async function* streamChatCompletion(
     systemPrompt: string,
     userMessage: string
 ): AsyncGenerator<string, void, unknown> {
-    const apiKey = getApiKey();
-
-    const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-            model: "mistral-large-latest",
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userMessage },
-            ],
-            stream: true,
-        }),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
-        throw new Error(`Mistral Chat Completion API error ${response.status}: ${errorText}`);
-    }
-
-    if (!response.body) {
-        throw new Error("Mistral API returned empty response body");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+    const agent = createAgent();
 
     try {
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        const stream = await agent.stream([
+            new SystemMessage(systemPrompt),
+            new HumanMessage(userMessage),
+        ]);
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed) continue;
-                if (trimmed === "data: [DONE]") continue;
-
-                if (trimmed.startsWith("data: ")) {
-                    try {
-                        const parsed = JSON.parse(trimmed.slice(6));
-                        const content = parsed.choices?.[0]?.delta?.content;
-                        if (content) {
-                            yield content;
-                        }
-                    } catch {
-                        // Skip malformed/incomplete JSON lines
-                    }
-                }
+        for await (const chunk of stream) {
+            if (typeof chunk.content === "string" && chunk.content) {
+                yield chunk.content;
             }
         }
-    } finally {
-        reader.releaseLock();
+    } catch (err: any) {
+        logger.error({ error: err.message }, "Error during LangChain ChatMistralAI stream execution");
+        throw new Error(`LangChain LLM Error: ${err.message}`);
     }
 }

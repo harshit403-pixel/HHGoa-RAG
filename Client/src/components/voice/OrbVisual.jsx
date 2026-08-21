@@ -37,19 +37,20 @@ function OrbVisual({
         }}
       />
 
-      {/* Orb body */}
-      <motion.img
-        src="/orb.png"
-        alt=""
-        draggable="false"
+      {/* Orb body (Pure CSS Solid Purple) */}
+      <motion.div
         className="
           absolute
           inset-0
           z-10
           h-full
           w-full
+          rounded-full
+          bg-[#8b5cf6]
+          border
+          border-white/10
+          shadow-[0_0_80px_rgba(139,92,246,0.25)]
           select-none
-          object-contain
         "
         animate={{
           y: isListening
