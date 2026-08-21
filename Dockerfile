@@ -47,9 +47,6 @@ COPY --from=client /app/dist ./public
 # Copy compiled FAISS index and SQLite metadata into final container
 COPY indexing/indexes/aligned_english* ./indexes/aligned_english/
 
-EXPOSE 5000
-
-ENV PORT=5000
 ENV NODE_ENV=production
 
 CMD ["npm", "start"]
