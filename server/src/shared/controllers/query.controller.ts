@@ -190,52 +190,41 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
         const groundingStart = performance.now();
         const groundingGuard = ModelHarness.checkRetrievalGrounding(rawResults);
         groundingMs = Number((performance.now() - groundingStart).toFixed(4));
+        
+        let hasContext = true;
+        let citations: any[] = [];
+        
         if (!groundingGuard.passed) {
-            logger.info({ queryText, reason: groundingGuard.reason }, "Refusing to answer due to grounding guardrails");
-            sendEvent("status", { step: "grounding_failed", message: `[Groundedness Verification] took ${groundingMs} ms. Status: Rejected (${groundingGuard.reason})`, timestamp: Date.now() });
-            sendEvent("metadata", {
-                query: queryText,
-                userLanguage,
-                searchedIndex: activeFolder,
-                translationNeeded,
-                translatedQuery,
-                sttMs,
-                translationMs,
-                searchMs,
-                embedMs,
-                retrieveMs: 0,
-                totalMs: Number((performance.now() - pipelineStart).toFixed(4)),
-                citations: []
-            });
-            sendEvent("chunk", { text: "I cannot find the answer in the provided documents." });
-            sendEvent("done", {});
-            res.end();
-            return;
-        }
-        sendEvent("status", { step: "grounding_done", message: `[Groundedness Verification] took ${groundingMs} ms. Status: Passed.`, timestamp: Date.now(), latency: groundingMs });
-
-        // 7. Extract the target language translation locally from the database (zero external API calls!)
-        sendEvent("status", { step: "retrieve_start", message: "Retrieving multilingual translations from SQLite DB...", timestamp: Date.now() });
-        const retrieveStart = performance.now();
-        const citations = rawResults.map(r => {
-            let text = r.text; // Default to English
-            if (baseLang !== "en" && r.translations) {
-                try {
-                    const transObj = JSON.parse(r.translations);
-                    if (transObj[baseLang]) {
-                        text = transObj[baseLang];
+            logger.info({ queryText, reason: groundingGuard.reason }, "No grounded context found - falling back to LLM general knowledge format");
+            sendEvent("status", { step: "grounding_failed", message: `[Groundedness Verification] took ${groundingMs} ms. No relevant documents match criteria.`, timestamp: Date.now() });
+            hasContext = false;
+            retrieveMs = 0;
+        } else {
+            sendEvent("status", { step: "grounding_done", message: `[Groundedness Verification] took ${groundingMs} ms. Status: Passed.`, timestamp: Date.now(), latency: groundingMs });
+            
+            // 7. Extract the target language translation locally from the database (zero external API calls!)
+            sendEvent("status", { step: "retrieve_start", message: "Retrieving multilingual translations from SQLite DB...", timestamp: Date.now() });
+            const retrieveStart = performance.now();
+            citations = rawResults.map(r => {
+                let text = r.text; // Default to English
+                if (baseLang !== "en" && r.translations) {
+                    try {
+                        const transObj = JSON.parse(r.translations);
+                        if (transObj[baseLang]) {
+                            text = transObj[baseLang];
+                        }
+                    } catch (e: any) {
+                        logger.warn({ error: e.message }, "Failed to parse translations JSON from database metadata");
                     }
-                } catch (e: any) {
-                    logger.warn({ error: e.message }, "Failed to parse translations JSON from database metadata");
                 }
-            }
-            return {
-                ...r,
-                text
-            };
-        });
-        retrieveMs = Number((performance.now() - retrieveStart).toFixed(4));
-        sendEvent("status", { step: "retrieve_done", message: `[Local Metadata Retrieval] took ${retrieveMs} ms. Fetched 5 context translations.`, timestamp: Date.now(), latency: retrieveMs });
+                return {
+                    ...r,
+                    text
+                };
+            });
+            retrieveMs = Number((performance.now() - retrieveStart).toFixed(4));
+            sendEvent("status", { step: "retrieve_done", message: `[Local Metadata Retrieval] took ${retrieveMs} ms. Fetched 5 context translations.`, timestamp: Date.now(), latency: retrieveMs });
+        }
 
         // Calculate and send RAG pipeline end event
         const totalMs = Number((performance.now() - pipelineStart).toFixed(4));
@@ -264,8 +253,15 @@ export async function handleQuery(req: Request, res: Response): Promise<void> {
         });
 
         // 8. Generate answer using Mistral Chat API
-        const contextString = citations.map((c, i) => `[Source ${i + 1}]: ${c.text}`).join("\n\n");
-        const systemPrompt = `You are a professional assistant. Answer the user's question in detail based ONLY on the provided context. If the context does not contain the answer, say "I cannot find the answer in the provided documents." DO NOT make up information.
+        const contextString = hasContext
+            ? citations.map((c, i) => `[Source ${i + 1}]: ${c.text}`).join("\n\n")
+            : "[No matching context found]";
+
+        const systemPrompt = `You are a professional assistant. 
+If context is provided and contains the answer, answer the user's question in detail based on the context.
+If no context is provided, or if the context does not contain the answer, you MUST reply using the following format:
+"I don't have enough context for this to answer but as per the LLM's knowledge: [provide a very short, direct answer here based on your general knowledge]"
+
 Your response MUST be written in the user's language: ${userLanguage}.
 
 Context:

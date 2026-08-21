@@ -1,14 +1,14 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
-import {
-  Search,
-  Database,
-  Mic,
-  Globe,
-  Brain,
-  Zap,
-  Check,
-  X,
+import { 
+  Search, 
+  Database, 
+  Mic, 
+  Globe, 
+  Brain, 
+  Zap, 
+  Check, 
+  X 
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import SourceCard from "../answer/SourceCard";
@@ -62,12 +62,12 @@ function Conversation({
                   className="flex justify-end"
                 >
                   <div className="max-w-2xl">
-                    <p className="mb-2 px-1 text-right text-[10px] font-medium uppercase tracking-[0.2em] text-[#171717]/35">
+                    <p className="mb-2 px-1 text-right text-[10px] font-medium uppercase tracking-[0.2em] text-[#171717]/25">
                       You
                     </p>
 
-                    <div className="rounded-3xl rounded-br-md border border-[#08733F]/10 bg-[#08733F]/[0.06] px-5 py-4 sm:px-6">
-                      <p className="text-sm leading-7 text-[#171717]/80 sm:text-base">
+                    <div className="rounded-3xl rounded-br-md border border-white/[0.07] bg-white/[0.045] px-5 py-4 sm:px-6">
+                      <p className="text-sm leading-7 text-[#171717]/75 sm:text-base">
                         {message.content}
                       </p>
                     </div>
@@ -112,7 +112,51 @@ function Conversation({
                   )}
                 </div>
 
-                {/* Answer */}
+                {/* 1. Sources (Rendered First) */}
+                {message.sources?.length > 0 && (
+                  <div>
+                    <div className="mb-4 flex items-center justify-between">
+                      <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-[#171717]/40">
+                        Retrieved context
+                      </p>
+
+                      <span className="text-[10px] text-[#171717]/30">
+                        {message.sources.length} sources
+                      </span>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {message.sources.map(
+                        (source, index) => (
+                          <SourceCard
+                            key={
+                              source.chunk_id ??
+                              source.id ??
+                              index
+                            }
+                            source={source}
+                            index={index}
+                          />
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Pipeline Console (Rendered Second) */}
+                {message.statusUpdates && message.statusUpdates.length > 0 && (
+                  <PipelineConsole
+                    statusUpdates={message.statusUpdates}
+                    isProcessing={isProcessing && messages[messages.length - 1]?.id === message.id}
+                  />
+                )}
+
+                {/* 3. Latency Diagnostics (Rendered Third) */}
+                <LatencyDashboard
+                  performance={message.performance}
+                />
+
+                {/* 4. Answer (Rendered Fourth / streaming at the end!) */}
                 <div className="max-w-3xl text-[15px] leading-8 text-[#171717]/80 sm:text-base">
                   {message.content ? (
                     <ReactMarkdown
@@ -186,75 +230,31 @@ function Conversation({
                       {message.content}
                     </ReactMarkdown>
                   ) : (
-                    isProcessing ? "Thinking..." : ""
+                    isProcessing && messages[messages.length - 1]?.id === message.id ? (
+                      <div className="flex items-center gap-1.5 h-3 pt-1 text-sm text-[#171717]/45">
+                        <motion.span
+                          animate={{ y: [0, -4, 0] }}
+                          transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut" }}
+                          className="block h-1.5 w-1.5 rounded-full bg-[#08733F]"
+                        />
+                        <motion.span
+                          animate={{ y: [0, -4, 0] }}
+                          transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", delay: 0.15 }}
+                          className="block h-1.5 w-1.5 rounded-full bg-[#08733F]"
+                        />
+                        <motion.span
+                          animate={{ y: [0, -4, 0] }}
+                          transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", delay: 0.3 }}
+                          className="block h-1.5 w-1.5 rounded-full bg-[#08733F]"
+                        />
+                        <span className="ml-1 text-xs">Formulating response...</span>
+                      </div>
+                    ) : null
                   )}
                 </div>
-
-                {/* Latency Diagnostics */}
-                <LatencyDashboard
-                  performance={message.performance}
-                />
-
-                {/* Sources */}
-                {message.sources?.length > 0 && (
-                  <div>
-                    <div className="mb-4 flex items-center justify-between">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-[#171717]/40">
-                        Retrieved context
-                      </p>
-
-                      <span className="text-[10px] text-[#171717]/30">
-                        {message.sources.length} sources
-                      </span>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {message.sources.map(
-                        (source, index) => (
-                          <SourceCard
-                            key={
-                              source.chunk_id ??
-                              source.id ??
-                              index
-                            }
-                            source={source}
-                            index={index}
-                          />
-                        )
-                      )}
-                    </div>
-                  </div>
-                )}
               </motion.article>
             );
           })}
-        </AnimatePresence>
-
-        {/* Pipeline SSE Status Logs Console */}
-        {statusUpdates.length > 0 && (
-          <motion.div
-            initial={{
-              opacity: 0,
-              y: 10,
-            }}
-            animate={{
-              opacity: 1,
-              y: 0,
-            }}
-            transition={{
-              duration: 0.4,
-            }}
-          >
-            <PipelineConsole
-              statusUpdates={statusUpdates}
-              isProcessing={isProcessing}
-            />
-          </motion.div>
-        )}
-
-        {/* Processing */}
-        <AnimatePresence>
-          {isProcessing && <ProcessingMessage />}
         </AnimatePresence>
 
         {/* Scroll target */}
@@ -274,7 +274,6 @@ function LatencyDashboard({ performance }) {
   let searchTime = performance.search || 0;
   let retrieveTime = performance.retrieve || 0;
   let retrievalTime = searchTime + retrieveTime;
-
   const totalTime = performance.total || 0;
   const embedTime = performance.embed || 0;
   const translateTime = performance.translate || 0;
@@ -373,7 +372,7 @@ function LatencyDashboard({ performance }) {
             <div>
               <div className="mb-1 flex justify-between font-mono text-[10px] text-[#171717]/60">
                 <span className="flex items-center gap-1.5">
-                  <Database className="h-3.5 w-3.5 shrink-0 text-[#FF0080]" />
+                  <Database className="h-3.5 w-3.5 shrink-0 text-[#08733F]" />
                   <span>
                     SQL metadata & translations (SQLite)
                   </span>
@@ -386,7 +385,7 @@ function LatencyDashboard({ performance }) {
 
               <div className="h-1 w-full overflow-hidden rounded-full bg-[#08733F]/[0.08]">
                 <div
-                  className="h-full rounded-full bg-[#FF0080]"
+                  className="h-full rounded-full bg-[#08733F]"
                   style={{
                     width: `${Math.min(
                       100,
@@ -473,25 +472,25 @@ function PipelineConsole({
   }, [statusUpdates.length]);
 
   return (
-    <div className="rounded-2xl border border-[#08733F]/15 bg-[#04552F] p-5 font-mono text-[11px] text-[#F8F5E8]/80 shadow-xl">
-      <div className="mb-3 flex items-center justify-between border-b border-[#F8F5E8]/10 pb-2 text-[10px] uppercase tracking-wider text-[#F8F5E8]/55">
+    <div className="rounded-2xl border border-slate-800 bg-[#090d16] p-5 font-mono text-[11px] text-slate-300 shadow-xl">
+      <div className="mb-3 flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
         <span>
           RAG Pipeline Execution Logs (SSE Stream)
         </span>
 
         {isProcessing ? (
-          <span className="flex items-center gap-1.5 text-[#3BAF70]">
-            <span className="h-1.5 w-1.5 animate-ping rounded-full bg-[#3BAF70]" />
+          <span className="flex items-center gap-1.5 text-cyan-400">
+            <span className="h-1.5 w-1.5 animate-ping rounded-full bg-cyan-400" />
             Streaming Live
           </span>
         ) : (
-          <span className="text-[#F8F5E8]/30">
+          <span className="text-slate-500">
             Finished
           </span>
         )}
       </div>
 
-      <div className="max-h-48 space-y-2 overflow-y-auto pr-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[#F8F5E8]/20">
+      <div className="max-h-48 space-y-2 overflow-y-auto pr-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-slate-800">
         {statusUpdates.map((update, idx) => {
           const date = new Date(update.timestamp);
 
@@ -515,17 +514,17 @@ function PipelineConsole({
             update.step.endsWith("_failed");
 
           let prefixIcon = (
-            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#3BAF70]/60" />
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-600" />
           );
 
-          let color = "text-[#F8F5E8]/60";
+          let color = "text-slate-300";
 
           if (isDone) {
             prefixIcon = (
-              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#3BAF70]" />
+              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
             );
 
-            color = "text-[#3BAF70]/90";
+            color = "text-emerald-300";
           } else if (isFailed) {
             prefixIcon = (
               <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
@@ -537,11 +536,11 @@ function PipelineConsole({
             idx === statusUpdates.length - 1
           ) {
             prefixIcon = (
-              <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-pulse text-[#FF0080]" />
+              <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-pulse text-cyan-400" />
             );
 
             color =
-              "animate-pulse text-[#FF0080]";
+              "animate-pulse text-cyan-400";
           }
 
           return (
@@ -549,7 +548,7 @@ function PipelineConsole({
               key={idx}
               className={`flex items-start gap-2 leading-relaxed ${color}`}
             >
-              <span className="shrink-0 font-medium text-[#F8F5E8]/30">
+              <span className="shrink-0 font-medium text-slate-500">
                 [{timeStr}]
               </span>
 
@@ -559,9 +558,8 @@ function PipelineConsole({
 
               <span className="whitespace-pre-wrap break-all">
                 {update.message}
-
                 {update.latency !== undefined && (
-                  <span className="ml-2 rounded bg-[#F8F5E8]/10 px-1 py-0.5 text-[9px] font-semibold text-[#F8F5E8]/50">
+                  <span className="ml-2 rounded bg-slate-800 px-1 py-0.5 text-[9px] font-semibold text-slate-400">
                     {update.latency}ms
                   </span>
                 )}
@@ -569,65 +567,9 @@ function PipelineConsole({
             </div>
           );
         })}
-
         <div ref={terminalEndRef} />
       </div>
     </div>
-  );
-}
-
-function ProcessingMessage() {
-  const dotTransition = {
-    duration: 0.6,
-    repeat: Infinity,
-    ease: "easeInOut",
-  };
-
-  return (
-    <motion.div
-      initial={{
-        opacity: 0,
-        y: 8,
-      }}
-      animate={{
-        opacity: 1,
-        y: 0,
-      }}
-      exit={{
-        opacity: 0,
-      }}
-      className="flex items-center gap-3 py-4 text-sm text-[#171717]/40"
-    >
-      <div className="flex h-3 items-center gap-1.5 pt-1">
-        <motion.span
-          animate={{ y: [0, -6, 0] }}
-          transition={dotTransition}
-          className="block h-1.5 w-1.5 rounded-full bg-[#08733F]"
-        />
-
-        <motion.span
-          animate={{ y: [0, -6, 0] }}
-          transition={{
-            ...dotTransition,
-            delay: 0.15,
-          }}
-          className="block h-1.5 w-1.5 rounded-full bg-[#08733F]"
-        />
-
-        <motion.span
-          animate={{ y: [0, -6, 0] }}
-          transition={{
-            ...dotTransition,
-            delay: 0.3,
-          }}
-          className="block h-1.5 w-1.5 rounded-full bg-[#08733F]"
-        />
-      </div>
-
-      <span className="font-medium tracking-wide">
-        Searching the knowledge base...
-      </span>
-    </motion.div>
   );
 }
 

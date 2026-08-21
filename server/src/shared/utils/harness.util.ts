@@ -59,8 +59,7 @@ export class ModelHarness {
         // 2. Off-topic classifier: checks if the query makes sense for the document corpus (MS MARCO facts/info)
         // For general queries, we want to reject completely random chit-chat or code-gen requests
         const offTopicTriggers = [
-            "write a python script", "javascript code", "create a function",
-            "hello", "how are you", "who are you", "what is your name"
+            "write a python script", "javascript code", "create a function"
         ];
         for (const trigger of offTopicTriggers) {
             if (lower.includes(trigger)) {

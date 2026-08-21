@@ -113,18 +113,27 @@ function useRagExperience() {
                   }));
                 }
 
-                setState((current) => ({
-                  ...current,
-                  statusUpdates: [
-                    ...current.statusUpdates,
-                    {
-                      step: data.step,
-                      message: data.message,
-                      timestamp: data.timestamp,
-                      latency: data.latency,
-                    },
-                  ],
-                }));
+                setState((current) => {
+                  const update = {
+                    step: data.step,
+                    message: data.message,
+                    timestamp: data.timestamp,
+                    latency: data.latency,
+                  };
+                  return {
+                    ...current,
+                    statusUpdates: [...current.statusUpdates, update],
+                    messages: current.messages.map((m) => {
+                      if (m.id === assistantMsgId) {
+                        return {
+                          ...m,
+                          statusUpdates: [...(m.statusUpdates || []), update],
+                        };
+                      }
+                      return m;
+                    }),
+                  };
+                });
               } else if (currentEvent === "metadata") {
                 setState((current) => ({
                   ...current,
