@@ -20,6 +20,9 @@ function Conversation({
 }) {
   const bottomRef = useRef(null);
 
+  // Monitor content changes of the latest message to force scroll during streaming
+  const latestContent = messages[messages.length - 1]?.content || "";
+
   useEffect(() => {
     if (!bottomRef.current) {
       return;
@@ -29,7 +32,7 @@ function Conversation({
       behavior: "smooth",
       block: "end",
     });
-  }, [messages.length, isProcessing, statusUpdates.length]);
+  }, [messages.length, isProcessing, statusUpdates.length, latestContent]);
 
   if (messages.length === 0 && !isProcessing) {
     return null;
@@ -472,25 +475,25 @@ function PipelineConsole({
   }, [statusUpdates.length]);
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-[#090d16] p-5 font-mono text-[11px] text-slate-300 shadow-xl">
-      <div className="mb-3 flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+    <div className="rounded-2xl border border-[#08733F]/15 bg-white/40 p-5 font-mono text-[11px] text-[#171717]/80 shadow-md">
+      <div className="mb-3 flex items-center justify-between border-b border-[#08733F]/10 pb-2 text-[10px] uppercase tracking-wider text-[#171717]/50 font-bold">
         <span>
           RAG Pipeline Execution Logs (SSE Stream)
         </span>
 
         {isProcessing ? (
-          <span className="flex items-center gap-1.5 text-cyan-400">
-            <span className="h-1.5 w-1.5 animate-ping rounded-full bg-cyan-400" />
+          <span className="flex items-center gap-1.5 text-[#08733F]">
+            <span className="h-1.5 w-1.5 animate-ping rounded-full bg-[#08733F]" />
             Streaming Live
           </span>
         ) : (
-          <span className="text-slate-500">
+          <span className="text-[#171717]/35">
             Finished
           </span>
         )}
       </div>
 
-      <div className="max-h-48 space-y-2 overflow-y-auto pr-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-slate-800">
+      <div className="max-h-48 space-y-2 overflow-y-auto pr-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[#08733F]/20">
         {statusUpdates.map((update, idx) => {
           const date = new Date(update.timestamp);
 
@@ -514,33 +517,33 @@ function PipelineConsole({
             update.step.endsWith("_failed");
 
           let prefixIcon = (
-            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-600" />
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#171717]/30" />
           );
 
-          let color = "text-slate-300";
+          let color = "text-[#171717]/70";
 
           if (isDone) {
             prefixIcon = (
-              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#08733F]" />
             );
 
-            color = "text-emerald-300";
+            color = "text-[#08733F]";
           } else if (isFailed) {
             prefixIcon = (
-              <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
+              <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />
             );
 
-            color = "text-red-400";
+            color = "text-red-500";
           } else if (
             isProcessing &&
             idx === statusUpdates.length - 1
           ) {
             prefixIcon = (
-              <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-pulse text-cyan-400" />
+              <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-pulse text-[#FF0080]" />
             );
 
             color =
-              "animate-pulse text-cyan-400";
+              "animate-pulse text-[#FF0080] font-bold";
           }
 
           return (
@@ -548,7 +551,7 @@ function PipelineConsole({
               key={idx}
               className={`flex items-start gap-2 leading-relaxed ${color}`}
             >
-              <span className="shrink-0 font-medium text-slate-500">
+              <span className="shrink-0 font-medium text-[#171717]/35">
                 [{timeStr}]
               </span>
 
@@ -559,7 +562,7 @@ function PipelineConsole({
               <span className="whitespace-pre-wrap break-all">
                 {update.message}
                 {update.latency !== undefined && (
-                  <span className="ml-2 rounded bg-slate-800 px-1 py-0.5 text-[9px] font-semibold text-slate-400">
+                  <span className="ml-2 rounded bg-[#08733F]/10 px-1 py-0.5 text-[9px] font-semibold text-[#08733F]/70">
                     {update.latency}ms
                   </span>
                 )}
