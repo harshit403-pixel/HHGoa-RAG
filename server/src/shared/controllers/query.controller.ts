@@ -26,6 +26,20 @@ function getSearcher(folderName: string): LanguageSearcher {
     return searcher;
 }
 
+export function warmupSearcher(): void {
+    try {
+        logger.info("Eagerly warming up FAISS searcher and SQLite database caches...");
+        const activeFolder = "aligned_english";
+        const searcher = getSearcher(activeFolder);
+        // Execute a dummy search to trigger OS memory mapping and SQLite cache warming
+        const dummyVector = new Float32Array(1024);
+        searcher.search(dummyVector, 1);
+        logger.info("RAG searcher warmup completed successfully.");
+    } catch (e: any) {
+        logger.warn({ error: e.message }, "Searcher warmup failed (index might not be compiled yet)");
+    }
+}
+
 export async function handleQuery(req: Request, res: Response): Promise<void> {
     // 1. Establish Server-Sent Events (SSE) connection
     res.setHeader("Content-Type", "text/event-stream");
