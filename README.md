@@ -4,7 +4,47 @@ A production-grade, ultra-fast **Multilingual Retrieval-Augmented Generation (RA
 
 ---
 
-## 🏗️ Detailed System Architecture Flow
+## 🏗️ System Architecture Flow
+
+The system runs in two main pipelines: **Indexing** (offline compilation) and **Retrieval & Answer Generation** (online runtime). 
+
+---
+
+### High-Level Pipelines Overview
+
+#### 1. Offline Indexing Pipeline
+```mermaid
+graph TD
+    A[hinval.parquet / Multilingual Corpus] --> B[Semantic & Window Chunking]
+    B --> C[English Alignment Translation]
+    C --> D[Mistral text-embedding-v1]
+    D --> E[FAISS HNSW Vector Index]
+    C --> F[SQLite Metadata Database metadata.db]
+    F -->|Keyed by faiss_id| E
+```
+
+#### 2. Online Retrieval & Generation Pipeline
+```mermaid
+graph TD
+    User([User Voice or Text]) --> STT{Voice Input?}
+    STT -->|Yes| STT_Proc[Sarvam Speech-to-Text]
+    STT -->|No| Guard[Input Guardrails Check]
+    STT_Proc --> Trans[Sarvam Translation to English]
+    Trans --> Guard
+    Guard -->|Passed| Embed[Mistral Query Embedding]
+    Guard -->|Blocked| Block[Reject & Emit Error]
+    Embed --> FAISS[FAISS Similarity Search]
+    FAISS -->|Top 5 Matches| Ground{Groundedness Check}
+    Ground -->|Passed| SQL[SQLite Context Retrieval]
+    Ground -->|Failed| Fallback[LLM General Knowledge Fallback]
+    SQL --> LLM[LangChain ChatMistralAI Stream]
+    Fallback --> LLM
+    LLM --> Stream([Streaming Answer to UI])
+```
+
+---
+
+### Detailed System Architecture Flowchart
 
 The following interactive flowchart maps the exact architecture, logic branches, and SSE channel communication routes of the system.
 
@@ -94,7 +134,7 @@ flowchart TD
     react_fe --> ui_ans[Answer]
     react_fe --> ui_sources[Retrieved Sources]
     react_fe --> ui_logs[Pipeline Execution Logs]
-    react_fe --> ui_latencies[Latency Diagnostics]
+    react_fe --> ui_latencies[ui_diagnostics]
 
     %% Styling configurations
     style id_dataset fill:#f3e8ff,stroke:#8b5cf6,stroke-width:2px
